@@ -75,11 +75,11 @@ holds:
     statement, and every upstream phase's output
 
 **(planned)** The per-phase system instructions, prompts, and Zod output
-schemas for the 10 agents beyond the Problem Analyst, Stakeholder
-Analyst, Pain Analyst, Research Agent, and Existing Solution Agent (see
-§2a/§2b/§2c) — this foundation establishes where they plug in
-(`AiProvider.generateStructured` via the phase registry), not their
-content.
+schemas for the 9 agents beyond the Problem Analyst, Stakeholder
+Analyst, Pain Analyst, Research Agent, Existing Solution Agent, and Gap
+Agent (see §2a/§2b/§2c/§2d) — this foundation establishes where they
+plug in (`AiProvider.generateStructured` via the phase registry), not
+their content.
 
 ### 2a. Phase engine and Phase 01 — Problem Intelligence (reference implementation)
 
@@ -310,7 +310,84 @@ training-data memory of companies or products:
   injectable research provider) mock `@/lib/research`'s
   `getResearchProvider` export instead.
 
-Phases 04–10 extend this the same way: add an entry to the agent
+### 2d. Phase 04 — Gap Intelligence
+
+The first phase driven by a single agent again (like Phase 01), but the
+first whose composer does substantial enforcement on top of that one
+call — because it's synthesizing across *three* upstream phases at
+once and the cost of a hallucinated gap is high. No research calls: it
+reasons entirely over Phases 01–03's already-collected evidence, so no
+`research` usage or `ResearchProvider` involvement at all — only the
+generic `ai` charge the phase engine already applies around one call.
+
+- **`src/lib/agents/gap-agent/`** — one Gemini call, grounded in the
+  approved Problem Intelligence, Stakeholder & Pain, and Existing
+  Solution outputs. Its central instruction is the phase's core rule:
+  **absence of evidence is not evidence of absence** — a source stating
+  "Product X provides traffic monitoring" does not prove Product X lacks
+  prediction; the honest label for the unaddressed capability is
+  `UNKNOWN`, not a gap. Every candidate is classified into exactly one
+  of four states: `CONFIRMED_GAP`, `CANDIDATE_GAP`, `UNVERIFIED_GAP`, or
+  `NO_GAP_ESTABLISHED` — the last one for anything the model initially
+  suspected but then found an existing solution already covers, which
+  is explicitly *not* a weak gap, it's not a gap at all. An empty
+  `gapCandidates` list — "no meaningful gap" — is a fully valid,
+  unpenalized result, the same way Phase 03 treats zero solutions.
+  `gapEvidenceClaimSchema` extends the evidence-tagging pattern with
+  `sourceIds` (plural) and its own `confidence`, richer than the shared
+  `EvidenceClaim`, and rejects at the schema level (`.superRefine`) any
+  claim marked `VERIFIED` with zero cited sources. Priority scoring
+  reuses the existing `Score` type unchanged (`basis: "ai_estimate"` is
+  already exactly the "model estimate, not a measurement" label the
+  spec asked for) rather than inventing new vocabulary.
+- **`src/lib/phases/gap-intelligence/`** — the composer, which does
+  everything Zod alone can't:
+  - Validates every stakeholder/pain/solution/source id the agent
+    cited against what Phases 01-03 actually produced — an
+    unresolvable reference is rejected as `invalid_output`, same
+    discipline as Phase 02/03.
+  - False-gap prevention beyond the prompt: a `CONFIRMED_GAP` whose
+    core claim (`missingCapability`) is only an `ASSUMPTION`, or which
+    cites zero sources, is rejected outright — "evidence strongly
+    indicates" cannot rest on an assumption alone, and this is checked
+    in code, not just requested of the model.
+  - Derives `confirmedGaps` / `candidateGaps` / `unverifiedGaps` /
+    `noGapFindings` (arrays of gap ids) by filtering the one
+    `gapCandidates` list on `gapState`, rather than asking the model to
+    repeat the same data across four arrays.
+  - Computes `evidenceSummary`'s `totalSourcesReferenced` and
+    `verifiedClaimsCount` from the actual gap/claim/coverage data —
+    the model only supplies the qualitative `narrative`, continuing
+    Phase 03's "no fake numbers" pattern.
+- **Coverage matrix** (`coverageMatrixEntrySchema`): a sparse list of
+  solution × stakeholder × pain × capability assessments
+  (`COVERED`/`PARTIALLY_COVERED`/`NOT_ESTABLISHED`/`UNKNOWN`) — the
+  model only reports combinations it can reason about, never an
+  exhaustive cartesian product padded with guesses, and
+  `NOT_ESTABLISHED` is deliberately kept distinct from "not covered."
+- **Research follow-up, scoped down**: the spec allows Phase 04 to
+  flag questions Phase 03's research didn't answer, with an explicit
+  warning not to turn this into an uncontrolled research loop. This
+  implementation takes the simpler, explicitly-permitted path: gap
+  candidates carry `validationQuestions` as data for future validation
+  (a later phase or a human), and Phase 04 performs **no follow-up
+  Tavily calls of its own** — no new research-usage accounting was
+  needed here at all.
+- **Dependency on Phase 01, 02, AND 03**: enforced entirely by the
+  existing, unmodified `PrismOrchestrator.canEnterPhase`. One nuance
+  worth documenting because it surprised a first draft of this phase's
+  own tests: `existing_solutions` (Phase 03) has `requiresApproval:
+  false` in the phase catalog, so the orchestrator only requires it to
+  have *run* (not be `not_started` or `failed`) before Phase 04 may
+  start — it does not need to be explicitly `approved`, unlike Phase 01
+  and Phase 02. That's the existing, correct gating behavior for a
+  non-approval-gated upstream phase, not a Phase 04-specific rule.
+- **Persistence**: `analysis_phases.output_data` (jsonb), same pattern
+  as Phases 01–03. No new tables.
+- **Registered** in `src/lib/phases/registry.ts` exactly like the prior
+  phases — no new API routes, no route changes.
+
+Phases 05–10 extend this the same way: add an entry to the agent
 registry, and where a phase needs more than one agent, have that
 phase's `execute` internally call each and merge their output — the
 phase engine only ever sees one `AiResult`.
@@ -453,15 +530,17 @@ Per the scope of this foundation pass, the following are intentionally
   obtain one through the UI)
 - Any investigation UI (problem input form, phase review/approval
   screens, dossier view, stakeholder/pain relationship graph, existing-
-  solution comparison view) — Phases 01–03 exist as tested API + service
-  layer only; see §2a/§2b/§2c. The stakeholder/pain data model is built
-  to support a future network-graph view (`painPointIds` on each
-  stakeholder), but no visual graph exists.
-- Phases 04–10's agents, schemas, and prompts (the registry and engine
-  they plug into are done — see §2a/§2b/§2c)
+  solution comparison view, gap coverage matrix view) — Phases 01–04
+  exist as tested API + service layer only; see §2a/§2b/§2c/§2d. The
+  stakeholder/pain data model is built to support a future network-graph
+  view (`painPointIds` on each stakeholder), but no visual graph exists.
+- Phases 05–10's agents, schemas, and prompts (the registry and engine
+  they plug into are done — see §2a/§2b/§2c/§2d)
 - Populating the normalized `stakeholders` / `pain_points` /
   `research_sources` tables from Phase 02/03 output (currently
-  jsonb-only — see §2b/§2c)
+  jsonb-only — see §2b/§2c). Phase 04 has no normalized-table
+  counterpart in the existing schema at all — its output lives in
+  `analysis_phases.output_data` only, by design (see §2d).
 - PDF upload handling for the `pdf_upload` input method (the schema and
   `source_file_url` column exist; nothing populates or reads a file yet)
 - The voice consultant and cinematic opening experience

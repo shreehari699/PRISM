@@ -11,6 +11,10 @@ import {
   existingSolutionsAnalysisSchema,
 } from "@/lib/phases/existing-solutions";
 import {
+  runGapIntelligencePhase,
+  gapIntelligenceAnalysisSchema,
+} from "@/lib/phases/gap-intelligence";
+import {
   runStakeholderPainPhase,
   stakeholderPainAnalysisSchema,
 } from "@/lib/phases/stakeholder-pain";
@@ -46,6 +50,10 @@ const registry: Partial<Record<PrismPhaseKey, PhaseExecutor>> = {
   existing_solutions: {
     schema: existingSolutionsAnalysisSchema,
     execute: (context, provider) => runExistingSolutionsPhase(context, provider),
+  },
+  gap_intelligence: {
+    schema: gapIntelligenceAnalysisSchema,
+    execute: (context, provider) => runGapIntelligencePhase(context, provider),
   },
 };
 
