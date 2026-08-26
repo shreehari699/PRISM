@@ -15,6 +15,10 @@ import {
   gapIntelligenceAnalysisSchema,
 } from "@/lib/phases/gap-intelligence";
 import {
+  runMarketInvestmentPhase,
+  marketInvestmentAnalysisSchema,
+} from "@/lib/phases/market-investment";
+import {
   runOpportunityInnovationPhase,
   opportunityInnovationAnalysisSchema,
 } from "@/lib/phases/opportunity-innovation";
@@ -62,6 +66,10 @@ const registry: Partial<Record<PrismPhaseKey, PhaseExecutor>> = {
   opportunity_innovation: {
     schema: opportunityInnovationAnalysisSchema,
     execute: (context, provider) => runOpportunityInnovationPhase(context, provider),
+  },
+  market_investment: {
+    schema: marketInvestmentAnalysisSchema,
+    execute: (context, provider) => runMarketInvestmentPhase(context, provider),
   },
 };
 

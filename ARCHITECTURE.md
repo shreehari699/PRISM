@@ -60,8 +60,13 @@ holds:
   Agent, Existing Solution Agent, Gap Agent, Opportunity Agent,
   Innovation Agent, Market Agent, Investment Agent, Feasibility Agent,
   Solution Consultant, Validation Agent, Jury Agent, Report Generator),
-  each mapped to the phase it belongs to. The first eight of these are
-  implemented (see §2a/§2b/§2c/§2d/§2e).
+  each mapped to the phase it belongs to. The first ten of these are
+  implemented (see §2a/§2b/§2c/§2d/§2e/§2f). Phase 06's Market Agent
+  internally depends on a Market Research Agent component
+  (`src/lib/agents/market-research-agent/`) the same way Phase 03's
+  named Research Agent internally splits into a question-generator and
+  an executor — an implementation detail under the one named
+  `market_agent` slot, not a 16th roster entry.
 - **`orchestrator.ts`** (`PrismOrchestrator`) — pure sequencing logic
   with no AI or database calls of its own:
   - `getActivePhase()` — which phase the project is currently on
@@ -76,12 +81,12 @@ holds:
     statement, and every upstream phase's output
 
 **(planned)** The per-phase system instructions, prompts, and Zod output
-schemas for the 7 agents beyond the Problem Analyst, Stakeholder
+schemas for the 5 agents beyond the Problem Analyst, Stakeholder
 Analyst, Pain Analyst, Research Agent, Existing Solution Agent, Gap
-Agent, Opportunity Agent, and Innovation Agent (see
-§2a/§2b/§2c/§2d/§2e) — this foundation establishes where they plug in
-(`AiProvider.generateStructured` via the phase registry), not their
-content.
+Agent, Opportunity Agent, Innovation Agent, Market Agent, and Investment
+Agent (see §2a/§2b/§2c/§2d/§2e/§2f) — this foundation establishes where
+they plug in (`AiProvider.generateStructured` via the phase registry),
+not their content.
 
 ### 2a. Phase engine and Phase 01 — Problem Intelligence (reference implementation)
 
@@ -502,7 +507,122 @@ single generic `ai` unit the phase engine already applies per run
 - **Registered** in `src/lib/phases/registry.ts` exactly like the prior
   phases — no new API routes, no route changes.
 
-Phases 06–10 extend this the same way: add an entry to the agent
+### 2f. Phase 06 — Market & Investment Intelligence
+
+Three calls in one composer run — a bounded Market Research Agent, the
+Market Agent, then the Investment Agent grounded in the Market Agent's
+own validated output — the same "phase engine sees one `AiResult`"
+pattern Phase 03 established for its own research-agent +
+existing-solution-agent pipeline. No new orchestration system, AI
+abstraction, or research provider: the Market Research Agent reuses the
+exact same `ResearchProvider` Phase 03 injects, just with its own
+market-flavored query categories and a phase-local executor
+(`src/lib/agents/market-research-agent/executor.ts`) — duplicated glue
+over the one shared abstraction, not a second one.
+
+- **Leading opportunity, not all of them**: the phase catalog's own
+  description ("assess market size, competitive landscape, and
+  investment considerations for the leading opportunity") settles a
+  question the spec text leaves open. The composer selects Phase 05's
+  own top-ranked opportunity (from `opportunityLandscape`, walking rank
+  1 upward until it finds one whose refined state isn't
+  `INSUFFICIENT_EVIDENCE`) — never re-ranking itself. `null` when
+  Phase 05 concluded `NO_MEANINGFUL_OPPORTUNITY`, and every agent is
+  written to produce an honest, evidence-thin analysis on that basis
+  rather than the phase being skipped.
+- **`src/lib/agents/market-research-agent/`** — the first call: a
+  question generator (10 market-specific categories — MARKET_SIZE,
+  MARKET_GROWTH, ADOPTION, INDUSTRY_TRENDS, GOVERNMENT_SPENDING,
+  CUSTOMER_BEHAVIOR, TECHNOLOGY_ADOPTION, REGULATORY, DEMAND,
+  GEOGRAPHIC) grounded in the leading opportunity specifically, never a
+  generic catch-all query — followed by the same bounded Tavily
+  execution pattern as Phase 03, checking the `research` usage quota
+  first and returning `budgetExhausted: true` (never a hard failure)
+  when it's spent. Sourced `sourceLocalId`s are prefixed
+  `market-source-` so they can never collide with Phase 03's own
+  `source-N` ids once the two lists are combined.
+- **Source reuse**: the composer combines Phase 03's existing-solution
+  sources with this phase's own newly-researched ones into one list
+  before ever calling the Market Agent — Phase 03's sources are never
+  re-fetched, only re-cited.
+- **`src/lib/prism/market.ts`** — `marketNumberSchema`, the one
+  primitive every market figure in this phase is expressed through
+  (TAM/SAM/SOM, pricing, unit economics). Its own `.superRefine()` is
+  what makes "no fabricated market numbers" an enforced invariant:
+  `UNKNOWN` must carry a null value; `VERIFIED` must cite at least one
+  source and must NOT carry a calculation (a verified figure was read
+  from a source, not derived); `MODEL_ESTIMATE` must show its
+  calculation (inputs, formula, assumptions) so the number is always
+  reproducible. `illustrativeValuationScenarioSchema` reuses the same
+  mechanism but mechanically forbids `VERIFIED` entirely — a valuation
+  can only ever be `ILLUSTRATIVE_MODEL_ESTIMATE` or `UNKNOWN`, so PRISM
+  can never present an exact company valuation as verified fact.
+- **`src/lib/agents/market-agent/`** — the second call. Produces the
+  customer model (five evidence-tagged questions — who experiences the
+  pain, who uses the solution, who pays, who approves, who benefits —
+  plus role assignments from a market-specific 9-role vocabulary: USER,
+  CUSTOMER, BUYER, BENEFICIARY, OPERATOR, OWNER, DECISION_MAKER,
+  REGULATOR, INFLUENCER, deliberately distinct from Phase 02's own
+  problem/pain-lens `StakeholderRole`), market segments (only genuinely
+  relevant ones from a 15-category list), the competitive landscape
+  (DIRECT/INDIRECT/SUBSTITUTE/INTERNAL_WORKAROUND/EMERGING, built from
+  Phase 03's solutions plus new research), market drivers, adoption
+  analysis, TAM/SAM/SOM, business models with pricing hypotheses, unit
+  economics, a fixed 7-dimension scalability assessment (technical,
+  operational, geographic, customer, support, regulatory, data — always
+  all seven, the same non-sparse shape as Phase 03's
+  `researchCoverageSchema`), the market reality check, and the market
+  scores.
+  - **Anti-overclaim, mechanically enforced**: `competitiveLandscape.summary`
+    is a `richEvidenceClaim`, so a `VERIFIED` "no competitors identified"
+    conclusion can only exist if it actually cites supporting research —
+    the existing VERIFIED-needs-a-source rule satisfies "don't claim 'no
+    competitors' without evidence" for free, no new logic needed. The
+    composer additionally rejects any competitor whose
+    `marketPositionIfVerified` uses market-leadership language ("market
+    leader", "dominant", "largest", …) unless `status` is `VERIFIED` —
+    the same pattern-match discipline Phase 05 applies to differentiation
+    claims.
+  - **TAM/SAM/SOM ordering**: the composer rejects a SAM larger than its
+    TAM, or a SOM larger than its SAM, whenever both figures are
+    non-null — a cheap, valuable sanity check no prompt instruction can
+    guarantee on its own.
+- **`src/lib/agents/investment-agent/`** — the third call, given the
+  Market Agent's already-validated output as an explicit parameter (the
+  same "second agent takes the first agent's output as a param" pattern
+  the Pain Analyst uses for the Stakeholder Analyst's output).
+  Produces investment analysis (capital intensity as a qualitative band —
+  `LOW`/`MODERATE`/`HIGH`/`VERY_HIGH` — never a specific currency figure,
+  plus concrete development/infrastructure/team/operational/deployment
+  requirements and a funding-stage recommendation), valuation drivers,
+  the investment reality check, investment scores, and the final
+  `confidenceSummary` and `consultantMessage` for the whole phase — it
+  sees both the market and investment picture, so it supersedes the
+  Market Agent's own framing, the same "last agent's message wins"
+  precedent Phase 02/04/05 already establish.
+- **`src/lib/phases/market-investment/`** — the composer. Beyond the
+  TAM/SAM/SOM ordering and market-leadership checks above, it walks
+  both agents' entire output trees collecting every `sourceIds` array
+  found anywhere (`collectCitedSourceIds` — a generic recursive walk
+  rather than enumerating each of the dozens of individual claim/number
+  fields by hand) and rejects any citation that doesn't resolve to the
+  combined Phase 03 + Phase 06 source list. `pricingHypotheses` and
+  `evidenceSummary` (verified/model-estimate/unknown counts,
+  `totalSourcesReferenced`) are computed here from the pipeline's own
+  data, never asked of either model. `marketEvidence.status` is set to
+  `PARTIAL_MARKET_EVIDENCE` — never asked of a model — whenever this
+  run's own research hit the usage budget or a query failure;
+  `validationQuestions` are merged and deduplicated from both agents.
+- **Dependency on Phase 01, 02, 04, AND 05**: enforced entirely by the
+  existing, unmodified `PrismOrchestrator.canEnterPhase` — no
+  Phase-06-specific gating logic. As with Phase 04/05, `existing_solutions`
+  (Phase 03) only has to have run, not be explicitly approved.
+- **Persistence**: `analysis_phases.output_data` (jsonb), same pattern
+  as Phases 01–05. No new tables.
+- **Registered** in `src/lib/phases/registry.ts` exactly like the prior
+  phases — no new API routes, no route changes.
+
+Phases 07–10 extend this the same way: add an entry to the agent
 registry, and where a phase needs more than one agent, have that
 phase's `execute` internally call each and merge their output — the
 phase engine only ever sees one `AiResult`.
@@ -558,7 +678,10 @@ Agent calls `getResearchProvider()` and consumes `ResearchSource`/
 `ResearchResult` exactly as defined here, with no phase-specific
 wrapper around the provider itself (only a `.extend()`'d schema for the
 two fields — `sourceLocalId`, the query that produced it — the phase
-needs on top).
+needs on top). Phase 06 (§2f) is the second caller, calling the exact
+same `getResearchProvider()` factory through its own Market Research
+Agent — same abstraction, same `.extend()` pattern, just its own
+market-flavored query-category enum.
 
 ## 5. Database (Supabase / Postgres)
 
@@ -646,17 +769,19 @@ Per the scope of this foundation pass, the following are intentionally
 - Any investigation UI (problem input form, phase review/approval
   screens, dossier view, stakeholder/pain relationship graph, existing-
   solution comparison view, gap coverage matrix view, opportunity
-  landscape/ranking view) — Phases 01–05 exist as tested API + service
-  layer only; see §2a/§2b/§2c/§2d/§2e. The stakeholder/pain data model
-  is built to support a future network-graph view (`painPointIds` on
-  each stakeholder), but no visual graph exists.
-- Phases 06–10's agents, schemas, and prompts (the registry and engine
-  they plug into are done — see §2a/§2b/§2c/§2d/§2e)
+  landscape/ranking view, market/TAM-SAM-SOM/investment view) — Phases
+  01–06 exist as tested API + service layer only; see
+  §2a/§2b/§2c/§2d/§2e/§2f. The stakeholder/pain data model is built to
+  support a future network-graph view (`painPointIds` on each
+  stakeholder), but no visual graph exists.
+- Phases 07–10's agents, schemas, and prompts (the registry and engine
+  they plug into are done — see §2a/§2b/§2c/§2d/§2e/§2f)
 - Populating the normalized `stakeholders` / `pain_points` /
   `research_sources` tables from Phase 02/03 output (currently
-  jsonb-only — see §2b/§2c). Phases 04 and 05 have no normalized-table
-  counterpart in the existing schema at all — their output lives in
-  `analysis_phases.output_data` only, by design (see §2d/§2e).
+  jsonb-only — see §2b/§2c). Phases 04, 05, and 06 have no
+  normalized-table counterpart in the existing schema at all — their
+  output lives in `analysis_phases.output_data` only, by design (see
+  §2d/§2e/§2f).
 - PDF upload handling for the `pdf_upload` input method (the schema and
   `source_file_url` column exist; nothing populates or reads a file yet)
 - The voice consultant and cinematic opening experience

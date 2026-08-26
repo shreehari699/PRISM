@@ -1,0 +1,160 @@
+import { describe, expect, it, vi } from "vitest";
+
+import type { MarketAgentOutput } from "@/lib/agents/market-agent/schema";
+import type { AiProvider } from "@/lib/ai/types";
+import type { Opportunity } from "@/lib/phases/opportunity-innovation/schema";
+
+import { runInvestmentAgent } from "./index";
+import { investmentAgentOutputSchema } from "./schema";
+
+function fakeProvider(
+  result: Awaited<ReturnType<AiProvider["generateStructured"]>>,
+): AiProvider {
+  return {
+    name: "fake",
+    model: "fake-model",
+    generateStructured: vi.fn().mockResolvedValue(result),
+  };
+}
+
+function unknownNumber() {
+  return {
+    status: "UNKNOWN" as const,
+    value: null,
+    unit: null,
+    currency: null,
+    geography: null,
+    period: null,
+    sourceIds: [],
+    calculation: null,
+    confidence: "low" as const,
+    reasoning: "n/a",
+  };
+}
+
+const marketAnalysis: MarketAgentOutput = {
+  marketSummary: "s",
+  customerModel: null,
+  marketSegments: [],
+  competitiveLandscape: {
+    competitors: [],
+    summary: { claim: "x", status: "ASSUMPTION", sourceIds: [], confidence: "low", reasoning: "y" },
+  },
+  marketDrivers: { adoptionDrivers: [], adoptionBarriers: [] },
+  adoptionAnalysis: { factors: [], adoptionRisk: "UNKNOWN", reasoning: "n/a" },
+  tamAnalysis: { definition: "n/a", value: unknownNumber() },
+  samAnalysis: { definition: "n/a", value: unknownNumber() },
+  somAnalysis: { definition: "n/a", value: unknownNumber() },
+  businessModels: [],
+  unitEconomics: {
+    customerAcquisitionCost: unknownNumber(),
+    revenuePerCustomer: unknownNumber(),
+    grossMargin: unknownNumber(),
+    operationalCost: unknownNumber(),
+    supportCost: unknownNumber(),
+    infrastructureCost: unknownNumber(),
+    paybackPeriod: unknownNumber(),
+    narrative: "n/a",
+  },
+  scalability: {
+    technical: { level: "UNKNOWN", reasoning: "n/a" },
+    operational: { level: "UNKNOWN", reasoning: "n/a" },
+    geographic: { level: "UNKNOWN", reasoning: "n/a" },
+    customer: { level: "UNKNOWN", reasoning: "n/a" },
+    support: { level: "UNKNOWN", reasoning: "n/a" },
+    regulatory: { level: "UNKNOWN", reasoning: "n/a" },
+    data: { level: "UNKNOWN", reasoning: "n/a" },
+  },
+  marketRealityCheck: { signal: "INSUFFICIENT_EVIDENCE", explanation: "e" },
+  marketScores: {
+    marketPotential: { value: 10, basis: "ai_estimate", reasoning: "n/a", confidence: "low" },
+    commercialPotential: { value: 10, basis: "ai_estimate", reasoning: "n/a", confidence: "low" },
+    adoptionPotential: { value: 10, basis: "ai_estimate", reasoning: "n/a", confidence: "low" },
+    scalability: { value: 10, basis: "ai_estimate", reasoning: "n/a", confidence: "low" },
+  },
+  validationQuestions: [],
+};
+
+const leadingOpportunity: Opportunity = {
+  opportunityId: "opp-1",
+  title: "District-level price transparency service",
+  description: "d",
+  unservedNeed: { claim: "x", status: "INFERENCE", sourceIds: [], confidence: "medium", reasoning: "y" },
+  affectedStakeholders: ["farmer"],
+  relatedPains: ["pain-1"],
+  relatedGaps: ["gap-1"],
+  existingSolutionContext: { claim: "x", status: "ASSUMPTION", sourceIds: [], confidence: "medium", reasoning: "y" },
+  whyNow: { factors: [], summary: "s" },
+  impact: [],
+  valuePotential: { value: 60, basis: "ai_estimate", reasoning: "n/a", confidence: "medium" },
+  impactPotential: { value: 55, basis: "ai_estimate", reasoning: "n/a", confidence: "medium" },
+  evidenceClaims: [],
+  confidence: "medium",
+  opportunityState: "PROMISING_OPPORTUNITY",
+  innovationDirections: [],
+  differentiation: { claim: "x", status: "ASSUMPTION", sourceIds: [], confidence: "medium", reasoning: "y" },
+  innovationPotential: { value: 55, basis: "ai_estimate", reasoning: "n/a", confidence: "medium" },
+  feasibilityPotential: { value: 50, basis: "ai_estimate", reasoning: "n/a", confidence: "medium" },
+  validationQuestions: [],
+};
+
+function context() {
+  return {
+    phaseKey: "market_investment" as const,
+    mode: "HACKATHON" as const,
+    criteria: ["demo_feasibility"],
+    problemStatement: "Farmers lack access to real-time crop pricing.",
+    upstreamOutputs: {},
+    userId: "user-1",
+  };
+}
+
+const validOutput = {
+  investmentAnalysis: {
+    capitalIntensity: "MODERATE",
+    capitalIntensityReasoning: "r",
+    initialDevelopmentRequirements: [],
+    infrastructureRequirements: [],
+    teamRequirements: [],
+    operationalRequirements: [],
+    deploymentRequirements: [],
+    fundingStageRecommendation: "PRE_SEED",
+    fundingStageReasoning: "r",
+  },
+  valuationDrivers: { drivers: [], illustrativeScenario: null },
+  investmentRealityCheck: { signal: "RESEARCH_BEFORE_INVESTMENT", explanation: "e" },
+  investmentScores: {
+    investmentReadiness: { value: 25, basis: "ai_estimate", reasoning: "n/a", confidence: "low" },
+  },
+  confidenceSummary: { overallConfidence: "WEAK", narrative: "n/a" },
+  validationQuestions: [],
+  consultantMessage: "m",
+};
+
+describe("runInvestmentAgent", () => {
+  it("calls the provider with the investment agent schema and the market analysis", async () => {
+    const provider = fakeProvider({ status: "ok", model: "x", data: validOutput });
+
+    const result = await runInvestmentAgent(
+      context(),
+      leadingOpportunity,
+      marketAnalysis,
+      provider,
+    );
+
+    expect(result.status).toBe("ok");
+    expect(provider.generateStructured).toHaveBeenCalledWith(
+      expect.objectContaining({ schema: investmentAgentOutputSchema }),
+    );
+    const call = vi.mocked(provider.generateStructured).mock.calls[0]![0];
+    expect(call.prompt).toContain("District-level price transparency service");
+  });
+
+  it("runs cleanly when there is no leading opportunity", async () => {
+    const provider = fakeProvider({ status: "ok", model: "x", data: validOutput });
+
+    const result = await runInvestmentAgent(context(), null, marketAnalysis, provider);
+
+    expect(result.status).toBe("ok");
+  });
+});
