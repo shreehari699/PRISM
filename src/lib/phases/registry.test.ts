@@ -4,7 +4,11 @@ import { PHASE_KEYS, type PrismPhaseKey } from "@/lib/prism/phases";
 
 import { getPhaseExecutor } from "./registry";
 
-const IMPLEMENTED: PrismPhaseKey[] = ["problem_intelligence", "stakeholder_pain"];
+const IMPLEMENTED: PrismPhaseKey[] = [
+  "problem_intelligence",
+  "stakeholder_pain",
+  "existing_solutions",
+];
 
 describe("getPhaseExecutor", () => {
   it.each(IMPLEMENTED)("returns an executor for %s", (key) => {

@@ -75,10 +75,11 @@ holds:
     statement, and every upstream phase's output
 
 **(planned)** The per-phase system instructions, prompts, and Zod output
-schemas for the 12 agents beyond the Problem Analyst, Stakeholder
-Analyst, and Pain Analyst (see §2a/§2b) — this foundation establishes
-where they plug in (`AiProvider.generateStructured` via the phase
-registry), not their content.
+schemas for the 10 agents beyond the Problem Analyst, Stakeholder
+Analyst, Pain Analyst, Research Agent, and Existing Solution Agent (see
+§2a/§2b/§2c) — this foundation establishes where they plug in
+(`AiProvider.generateStructured` via the phase registry), not their
+content.
 
 ### 2a. Phase engine and Phase 01 — Problem Intelligence (reference implementation)
 
@@ -200,7 +201,116 @@ rather than only the raw problem statement:
   for `stakeholder_pain` go through the same
   `POST /api/sessions/[sessionId]/phases/[phaseKey]` endpoint.
 
-Phases 03–10 extend this the same way: add an entry to the agent
+### 2c. Phase 03 — Existing Solution Intelligence + live research
+
+The first phase to actually call the research provider abstraction
+(§4) — Phases 01–02 only ever called Gemini — and the first to depend
+on *two* upstream phases (`problem_intelligence` AND `stakeholder_pain`
+must both be approved). It answers "what already exists for this
+problem?" from real Tavily search results, never from Gemini's own
+training-data memory of companies or products:
+
+- **`src/lib/agents/research-agent/`** — the research half of the
+  phase, itself a small pipeline:
+  - `question-generator.ts` (Gemini) — reads the approved Phase 01 +
+    Phase 02 output and produces multiple targeted, deduplication-ready
+    search queries across nine categories (`COMMERCIAL`, `STARTUP`,
+    `GOVERNMENT`, `ACADEMIC`, `OPEN_SOURCE`, `INTERNATIONAL`,
+    `TECHNOLOGY`, `WORKFLOW`, `ALTERNATIVE`) — never one catch-all
+    query, and explicitly told to distrust its own memory.
+  - `executor.ts` — plain code, no AI: deduplicates queries
+    (case/whitespace-insensitive), runs each sequentially against the
+    **existing** `ResearchProvider` from `src/lib/research` (no second
+    Tavily client, no second research abstraction), continues past a
+    failed query rather than aborting the batch, and deduplicates the
+    resulting sources by URL. Every result is tagged with a
+    `sourceLocalId` for cross-referencing and the query/category that
+    produced it (`phaseSourceSchema` — an `.extend()` of the existing
+    `researchSourceSchema`, not a parallel schema).
+  - `index.ts` (`runResearchAgent`) — combines the two into one
+    `research` usage charge: checks `checkUsage(userId, "research")`
+    *before* even generating queries (so an exhausted budget costs
+    nothing, not even a wasted Gemini call), and calls
+    `recordUsage(userId, "research", 0)` exactly once after the whole
+    batch, regardless of how many individual queries ran underneath —
+    the same "one phase run, one charge" principle Phase 02 established
+    for its two Gemini calls, just applied to the research quota
+    instead of the AI quota (which the phase engine already handles
+    generically around the whole phase run). An exhausted budget
+    produces an `ok` result with `budgetExhausted: true`, not a
+    failure — running out of free research capacity is a legitimate
+    PRISM outcome, and the phase still returns a complete, honest
+    result.
+- **`src/lib/agents/existing-solution-agent/`** — takes the normalized
+  sources plus real, code-computed research counts (never numbers the
+  model made up) and extracts every credible existing solution they
+  actually support, with full `EvidenceClaim` tagging throughout so
+  "Company X provides a platform for Y" never silently becomes "X is
+  the market leader." Every solution must cite at least one real
+  `sourceIds` entry — enforced by the schema itself
+  (`sourceIds: z.array(...).min(1)`), not just the prompt — and zero
+  solutions is an explicitly valid, un-penalized result (`solutions`
+  has no `.min(1)`, unlike Phase 02's stakeholders/pains). Comparison
+  fields (stakeholder/pain coverage, accessibility, cost, scalability,
+  geographic coverage) live on the same solution object rather than a
+  separate nested type, since they're the same solution examined from
+  a different angle, not a different entity. Fields the model can't
+  determine hold the literal string `"UNKNOWN"` (never omitted) — a
+  deliberate difference from Phase 01/02's `.optional()` convention,
+  chosen because this phase's spec explicitly wants a required,
+  always-present marker for "checked and couldn't determine," not an
+  absent field indistinguishable from "wasn't asked."
+- **`src/lib/phases/existing-solutions/`** — the composer. Runs the
+  two steps above in sequence, then:
+  - Validates every cross-reference before accepting the result: each
+    solution's `sourceIds` must resolve to a source the research step
+    actually returned, or the whole result comes back `invalid_output`
+    — the same "don't trust either side to stay in sync" discipline
+    Phase 02 applied to stakeholder/pain references.
+  - Computes `stats` (sourcesFound, sourcesUsed, solutionsIdentified,
+    queriesExecuted, researchFailures, budgetExhausted) and
+    `researchCoverage` (`HIGH`/`MEDIUM`/`LOW`/`INSUFFICIENT` for seven
+    of the nine query categories — the spec's own coverage section
+    lists seven, deliberately excluding `WORKFLOW`/`ALTERNATIVE` from a
+    dedicated line) **entirely in this file, from the pipeline's own
+    counts** — there is no code path where a number in the final output
+    came from asking the model. Coverage is a transparent, reproducible
+    heuristic (source count weighted by the provider's own reported
+    relevance), not a second model judgment call.
+  - Combines token usage from both Gemini calls via the shared
+    `combineUsage` helper (`src/lib/ai/combine-usage.ts`, promoted out
+    of Phase 02's composer once a second phase needed the same
+    pattern) so the engine's `ai` usage charge is still exactly one
+    request per phase run.
+- **Dependency on Phase 01 AND Phase 02**: enforced entirely by the
+  existing, unmodified `PrismOrchestrator.canEnterPhase` — no
+  phase-03-specific gating code exists, same as Phase 02's single
+  dependency on Phase 01.
+- **`context.userId`**: Phase 03 is the first phase whose executor
+  needs to check/record a usage quota (`research`) the generic phase
+  engine doesn't already track for it. `ProjectContext` and
+  `PhaseExecutionContext` (`src/lib/orchestrator/types.ts`) gained an
+  optional `userId` field for exactly this — `PrismOrchestrator`
+  threads it through `buildExecutionContext` unchanged for every other
+  phase, which never reads it.
+- **Persistence**: `analysis_phases.output_data` (jsonb), same pattern
+  as Phases 01–02. `research_sources` — the normalized table already in
+  the schema — is **not** populated by this pass, for the same
+  reasoning as Phase 02's stakeholders/pain_points tables (§2b): the
+  jsonb blob already satisfies every requirement this phase actually
+  has, and a second persisted representation would only risk drifting
+  from it.
+- **Registered** in `src/lib/phases/registry.ts` exactly like Phases
+  01–02 — no new API routes. One limitation of the current
+  `PhaseExecutor` interface: `execute` only accepts an injectable
+  `AiProvider`, not a research provider, so Phase 03's registry entry
+  always resolves its own `getResearchProvider()` internally. Tests
+  that exercise Phase 03 through the real registry (as opposed to
+  calling `runExistingSolutionsPhase` directly, which does accept an
+  injectable research provider) mock `@/lib/research`'s
+  `getResearchProvider` export instead.
+
+Phases 04–10 extend this the same way: add an entry to the agent
 registry, and where a phase needs more than one agent, have that
 phase's `execute` internally call each and merge their output — the
 phase engine only ever sees one `AiResult`.
@@ -250,6 +360,13 @@ phase engine only ever sees one `AiResult`.
 PRISM never fabricates companies, papers, URLs, or statistics — a
 research call either returns real normalized sources, or an explicit
 `unavailable`/`error` state the UI must show as such.
+
+Phase 03 (§2c) is this abstraction's first real caller — its Research
+Agent calls `getResearchProvider()` and consumes `ResearchSource`/
+`ResearchResult` exactly as defined here, with no phase-specific
+wrapper around the provider itself (only a `.extend()`'d schema for the
+two fields — `sourceLocalId`, the query that produced it — the phase
+needs on top).
 
 ## 5. Database (Supabase / Postgres)
 
@@ -335,14 +452,16 @@ Per the scope of this foundation pass, the following are intentionally
   session — but no login page exists yet, so there's currently no way to
   obtain one through the UI)
 - Any investigation UI (problem input form, phase review/approval
-  screens, dossier view, stakeholder/pain relationship graph) — Phases
-  01 and 02 exist as tested API + service layer only; see §2a/§2b. The
-  stakeholder/pain data model is built to support a future network-graph
-  view (`painPointIds` on each stakeholder), but no visual graph exists.
-- Phases 03–10's agents, schemas, and prompts (the registry and engine
-  they plug into are done — see §2a/§2b)
-- Populating the normalized `stakeholders` / `pain_points` tables from
-  Phase 02 output (currently jsonb-only — see §2b)
+  screens, dossier view, stakeholder/pain relationship graph, existing-
+  solution comparison view) — Phases 01–03 exist as tested API + service
+  layer only; see §2a/§2b/§2c. The stakeholder/pain data model is built
+  to support a future network-graph view (`painPointIds` on each
+  stakeholder), but no visual graph exists.
+- Phases 04–10's agents, schemas, and prompts (the registry and engine
+  they plug into are done — see §2a/§2b/§2c)
+- Populating the normalized `stakeholders` / `pain_points` /
+  `research_sources` tables from Phase 02/03 output (currently
+  jsonb-only — see §2b/§2c)
 - PDF upload handling for the `pdf_upload` input method (the schema and
   `source_file_url` column exist; nothing populates or reads a file yet)
 - The voice consultant and cinematic opening experience

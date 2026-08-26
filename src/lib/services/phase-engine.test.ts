@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AiProvider } from "@/lib/ai/types";
+import type { ResearchResult } from "@/lib/research";
 
 import { createMockDb, dbError, noRow, row, rows } from "./test-support/mock-db";
 
@@ -11,6 +12,30 @@ vi.mock("@/lib/usage", () => ({
   checkUsage: (...args: unknown[]) => checkUsageMock(...args),
   recordUsage: (...args: unknown[]) => recordUsageMock(...args),
 }));
+
+/**
+ * Phase 03's registry entry always resolves its own research provider
+ * via `getResearchProvider()` (the phase engine has no way to inject one
+ * through the generic `PhaseExecutor` interface, by design — see
+ * ARCHITECTURE.md §2c). Mocking it here keeps these tests from needing
+ * real Tavily env vars or touching the network, while still exercising
+ * the real registry wiring end-to-end. Every response configured below
+ * is a legitimate `ResearchResult` value (including "unavailable") —
+ * never a fabricated success.
+ */
+const researchSearchMock = vi.fn();
+
+vi.mock("@/lib/research", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/research")>();
+  return {
+    ...actual,
+    getResearchProvider: () => ({
+      name: "mock",
+      isConfigured: true,
+      search: (...args: unknown[]) => researchSearchMock(...args),
+    }),
+  };
+});
 
 const { executePhaseAction, getPhaseState } = await import("./phase-engine");
 
@@ -180,6 +205,13 @@ beforeEach(() => {
     remaining: { daily: 10, monthly: 100 },
   });
   recordUsageMock.mockResolvedValue(undefined);
+
+  researchSearchMock.mockReset();
+  researchSearchMock.mockResolvedValue({
+    status: "unavailable",
+    reason: "no default configured for this test",
+    provider: "mock",
+  } satisfies ResearchResult);
 });
 
 describe("getPhaseState", () => {
@@ -321,10 +353,11 @@ describe("executePhaseAction: run", () => {
       problem_statements: [row(problemStatementRow)],
       analysis_phases: [
         rows([
-          // Both implemented phases approved, unblocking existing_solutions
-          // (Phase 03), which has no registered agent yet.
+          // Every implemented phase approved, unblocking gap_intelligence
+          // (Phase 04), which has no registered agent yet.
           phaseRow({ id: "phase-1", phase_key: "problem_intelligence", status: "approved" }),
           phaseRow({ id: "phase-2", phase_key: "stakeholder_pain", status: "approved" }),
+          phaseRow({ id: "phase-3", phase_key: "existing_solutions", status: "approved" }),
         ]),
       ],
     });
@@ -335,7 +368,7 @@ describe("executePhaseAction: run", () => {
       admin,
       userId: "user-1",
       sessionId: "session-1",
-      phaseKey: "existing_solutions",
+      phaseKey: "gap_intelligence",
       action: "run",
     });
 
@@ -942,6 +975,489 @@ describe("executePhaseAction: stakeholder_pain (Phase 02) depends on an approved
       userId: "user-1",
       sessionId: "session-1",
       phaseKey: "problem_intelligence",
+      action: "regenerate",
+      aiProvider: provider,
+    });
+
+    expect(result.ok).toBe(true);
+    const analysisPhaseCalls = (
+      admin.from as unknown as ReturnType<typeof vi.fn>
+    ).mock.calls.filter((call: unknown[]) => call[0] === "analysis_phases");
+    expect(analysisPhaseCalls).toHaveLength(3);
+  });
+});
+
+const validQuestionGeneratorOutput = {
+  queries: [
+    {
+      query: "government crop pricing platform India",
+      category: "GOVERNMENT",
+      reason: "r",
+      targetInformation: "t",
+    },
+  ],
+};
+
+const validSolutionExtractorOutput = {
+  solutions: [
+    {
+      localId: "sol-1",
+      name: "eNAM",
+      organization: "Government of India",
+      country: "India",
+      yearIfVerified: "2016",
+      solutionType: "GOVERNMENT_PROGRAM",
+      problemAddressed: { claim: "x", status: "VERIFIED", reasoning: "y" },
+      howItWorks: { claim: "x", status: "INFERENCE", reasoning: "y" },
+      deploymentStatus: "ACTIVE",
+      businessModelIfKnown: "UNKNOWN",
+      sourceIds: ["source-1"],
+      confidence: "medium",
+      costInformation: "UNKNOWN",
+      geographicCoverage: "India",
+      evidenceConfidence: "medium",
+    },
+  ],
+  consultantMessage: "We're not the first to attack this — a government platform already exists.",
+};
+
+const rawResearchSource = {
+  title: "eNAM",
+  url: "https://enam.gov.in",
+  sourceType: "government",
+  retrievedAt: now,
+  snippet: "A national electronic trading platform.",
+};
+
+describe("executePhaseAction: existing_solutions (Phase 03) depends on approved Phase 01 AND Phase 02", () => {
+  it("blocks Phase 03 when Phase 02 has never run", async () => {
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [
+        rows([
+          phaseRow({
+            id: "phase-1",
+            phase_key: "problem_intelligence",
+            status: "approved",
+            output_data: validAnatomy,
+          }),
+        ]),
+      ],
+    });
+    const admin = createMockDb({});
+    const provider = sequenceProvider([]);
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "existing_solutions",
+      action: "run",
+      aiProvider: provider,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("conflict");
+      expect(result.message).toMatch(/has not been run yet/);
+    }
+    expect(provider.generateStructured).not.toHaveBeenCalled();
+    expect(researchSearchMock).not.toHaveBeenCalled();
+  });
+
+  it("blocks Phase 03 when Phase 02 is awaiting approval", async () => {
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [
+        rows([
+          phaseRow({
+            id: "phase-1",
+            phase_key: "problem_intelligence",
+            status: "approved",
+            output_data: validAnatomy,
+          }),
+          phaseRow({
+            id: "phase-2",
+            phase_key: "stakeholder_pain",
+            status: "awaiting_approval",
+            output_data: mergedStakeholderPainOutput,
+          }),
+        ]),
+      ],
+    });
+    const admin = createMockDb({});
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "existing_solutions",
+      action: "run",
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("conflict");
+      expect(result.message).toMatch(/awaiting your approval/);
+    }
+  });
+
+  it("blocks Phase 03 when Phase 02 is stale (needs_regeneration)", async () => {
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [
+        rows([
+          phaseRow({
+            id: "phase-1",
+            phase_key: "problem_intelligence",
+            status: "approved",
+            output_data: validAnatomy,
+          }),
+          phaseRow({
+            id: "phase-2",
+            phase_key: "stakeholder_pain",
+            status: "needs_regeneration",
+            output_data: mergedStakeholderPainOutput,
+          }),
+        ]),
+      ],
+    });
+    const admin = createMockDb({});
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "existing_solutions",
+      action: "run",
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("conflict");
+  });
+
+  it("runs Phase 03 successfully once Phase 01 and Phase 02 are both approved", async () => {
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [
+        rows([
+          phaseRow({
+            id: "phase-1",
+            phase_key: "problem_intelligence",
+            status: "approved",
+            output_data: validAnatomy,
+          }),
+          phaseRow({
+            id: "phase-2",
+            phase_key: "stakeholder_pain",
+            status: "approved",
+            output_data: mergedStakeholderPainOutput,
+          }),
+        ]),
+      ],
+    });
+    const admin = createMockDb({
+      analysis_phases: [
+        row(phaseRow({ id: "phase-3", phase_key: "existing_solutions", status: "running" })),
+        row(
+          phaseRow({
+            id: "phase-3",
+            phase_key: "existing_solutions",
+            status: "awaiting_approval",
+          }),
+        ),
+      ],
+    });
+    const provider = sequenceProvider([
+      { status: "ok", model: "fake-model", data: validQuestionGeneratorOutput },
+      { status: "ok", model: "fake-model", data: validSolutionExtractorOutput },
+    ]);
+    researchSearchMock.mockResolvedValueOnce({
+      status: "ok",
+      provider: "mock",
+      sources: [rawResearchSource],
+    });
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "existing_solutions",
+      action: "run",
+      aiProvider: provider,
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data.status).toBe("awaiting_approval");
+    expect(provider.generateStructured).toHaveBeenCalledTimes(2);
+    expect(researchSearchMock).toHaveBeenCalledTimes(1);
+    // Two distinct usage quotas were touched by this one phase run: the
+    // outer engine's `ai` check around the whole run, and Phase 03's own
+    // `research` check for its Tavily calls.
+    expect(checkUsageMock).toHaveBeenCalledWith("user-1", "ai");
+    expect(checkUsageMock).toHaveBeenCalledWith("user-1", "research");
+    expect(recordUsageMock).toHaveBeenCalledWith("user-1", "research", 0);
+  });
+
+  it("marks Phase 03 failed (not fabricated) when the Existing Solution Agent returns invalid_output", async () => {
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [
+        rows([
+          phaseRow({
+            id: "phase-1",
+            phase_key: "problem_intelligence",
+            status: "approved",
+            output_data: validAnatomy,
+          }),
+          phaseRow({
+            id: "phase-2",
+            phase_key: "stakeholder_pain",
+            status: "approved",
+            output_data: mergedStakeholderPainOutput,
+          }),
+        ]),
+      ],
+    });
+    const admin = createMockDb({
+      analysis_phases: [
+        row(phaseRow({ id: "phase-3", phase_key: "existing_solutions", status: "running" })),
+        noRow,
+      ],
+    });
+    const provider = sequenceProvider([
+      { status: "ok", model: "fake-model", data: validQuestionGeneratorOutput },
+      { status: "invalid_output", message: "bad json", raw: "{}" },
+    ]);
+    researchSearchMock.mockResolvedValueOnce({
+      status: "ok",
+      provider: "mock",
+      sources: [rawResearchSource],
+    });
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "existing_solutions",
+      action: "run",
+      aiProvider: provider,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("error");
+  });
+
+  it("never spends an AI call once the usage limit is reached, even before research starts", async () => {
+    checkUsageMock.mockResolvedValue({
+      allowed: false,
+      safeMode: true,
+      reason: "Daily ai request limit reached (50/day).",
+      remaining: { daily: 0, monthly: 10 },
+    });
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [
+        rows([
+          phaseRow({
+            id: "phase-1",
+            phase_key: "problem_intelligence",
+            status: "approved",
+            output_data: validAnatomy,
+          }),
+          phaseRow({
+            id: "phase-2",
+            phase_key: "stakeholder_pain",
+            status: "approved",
+            output_data: mergedStakeholderPainOutput,
+          }),
+        ]),
+      ],
+    });
+    const admin = createMockDb({});
+    const provider = sequenceProvider([]);
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "existing_solutions",
+      action: "run",
+      aiProvider: provider,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("unavailable");
+    expect(provider.generateStructured).not.toHaveBeenCalled();
+    expect(researchSearchMock).not.toHaveBeenCalled();
+  });
+
+  it("returns not_found for a session the caller doesn't own", async () => {
+    const supabase = createMockDb({ analysis_sessions: [noRow] });
+    const admin = createMockDb({});
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "missing",
+      phaseKey: "existing_solutions",
+      action: "run",
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("not_found");
+  });
+
+  it("regenerates an approved Phase 03, archiving history and bumping the version", async () => {
+    const priorOutput = { queries: [], sources: [], solutions: [], researchCoverage: {}, stats: {}, consultantMessage: "old" };
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [
+        rows([
+          phaseRow({
+            id: "phase-1",
+            phase_key: "problem_intelligence",
+            status: "approved",
+            output_data: validAnatomy,
+          }),
+          phaseRow({
+            id: "phase-2",
+            phase_key: "stakeholder_pain",
+            status: "approved",
+            output_data: mergedStakeholderPainOutput,
+          }),
+          phaseRow({
+            id: "phase-3",
+            phase_key: "existing_solutions",
+            status: "approved",
+            version: 1,
+            output_data: priorOutput,
+          }),
+        ]),
+      ],
+    });
+    const admin = createMockDb({
+      analysis_phase_history: [noRow],
+      analysis_phases: [
+        row(
+          phaseRow({
+            id: "phase-3",
+            phase_key: "existing_solutions",
+            status: "running",
+            version: 2,
+          }),
+        ),
+        row(
+          phaseRow({
+            id: "phase-3",
+            phase_key: "existing_solutions",
+            status: "awaiting_approval",
+            version: 2,
+          }),
+        ),
+      ],
+    });
+    const provider = sequenceProvider([
+      { status: "ok", model: "fake-model", data: validQuestionGeneratorOutput },
+      { status: "ok", model: "fake-model", data: validSolutionExtractorOutput },
+    ]);
+    researchSearchMock.mockResolvedValueOnce({
+      status: "ok",
+      provider: "mock",
+      sources: [rawResearchSource],
+    });
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "existing_solutions",
+      action: "regenerate",
+      aiProvider: provider,
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data.version).toBe(2);
+  });
+
+  it("regenerating an approved Phase 02 flags an already-approved Phase 03 as needs_regeneration", async () => {
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [
+        rows([
+          phaseRow({
+            id: "phase-1",
+            phase_key: "problem_intelligence",
+            status: "approved",
+            output_data: validAnatomy,
+          }),
+          phaseRow({
+            id: "phase-2",
+            phase_key: "stakeholder_pain",
+            status: "approved",
+            version: 1,
+            output_data: mergedStakeholderPainOutput,
+          }),
+          phaseRow({
+            id: "phase-3",
+            phase_key: "existing_solutions",
+            status: "approved",
+            output_data: { queries: [], sources: [], solutions: [], researchCoverage: {}, stats: {}, consultantMessage: "old" },
+          }),
+        ]),
+      ],
+    });
+    const admin = createMockDb({
+      analysis_phase_history: [noRow],
+      analysis_phases: [
+        row(phaseRow({ id: "phase-2", phase_key: "stakeholder_pain", status: "running", version: 2 })),
+        row(
+          phaseRow({
+            id: "phase-2",
+            phase_key: "stakeholder_pain",
+            status: "awaiting_approval",
+            version: 2,
+            output_data: mergedStakeholderPainOutput,
+          }),
+        ),
+        noRow, // bulk update marking existing_solutions needs_regeneration
+      ],
+    });
+    const provider = sequenceProvider([
+      { status: "ok", model: "fake-model", data: validStakeholderOutput },
+      { status: "ok", model: "fake-model", data: validPainOutput },
+    ]);
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "stakeholder_pain",
       action: "regenerate",
       aiProvider: provider,
     });

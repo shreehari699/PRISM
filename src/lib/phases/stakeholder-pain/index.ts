@@ -2,7 +2,7 @@ import "server-only";
 
 import { runPainAnalyst } from "@/lib/agents/pain-analyst";
 import { runStakeholderAnalyst } from "@/lib/agents/stakeholder-analyst";
-import { getAiProvider, type AiProvider, type AiResult, type AiUsage } from "@/lib/ai";
+import { combineUsage, getAiProvider, type AiProvider, type AiResult } from "@/lib/ai";
 import type { PhaseExecutionContext } from "@/lib/orchestrator/types";
 
 import {
@@ -12,15 +12,6 @@ import {
 } from "./schema";
 
 export * from "./schema";
-
-function combineUsage(a?: AiUsage, b?: AiUsage): AiUsage | undefined {
-  if (!a && !b) return undefined;
-  return {
-    promptTokens: (a?.promptTokens ?? 0) + (b?.promptTokens ?? 0),
-    responseTokens: (a?.responseTokens ?? 0) + (b?.responseTokens ?? 0),
-    totalTokens: (a?.totalTokens ?? 0) + (b?.totalTokens ?? 0),
-  };
-}
 
 /**
  * Phase 02 — Stakeholder & Pain Intelligence. Runs the Stakeholder

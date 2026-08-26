@@ -6,6 +6,7 @@ import { GeminiProvider } from "./gemini-provider";
 import type { AiProvider } from "./types";
 
 export * from "./types";
+export { combineUsage } from "./combine-usage";
 
 let cached: AiProvider | undefined;
 

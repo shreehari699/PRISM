@@ -174,4 +174,23 @@ describe("PrismOrchestrator.buildExecutionContext", () => {
       summary: "the anatomy",
     });
   });
+
+  it("passes userId through when the project context carries one", () => {
+    const orchestrator = new PrismOrchestrator({
+      ...context([]),
+      userId: "user-1",
+    });
+
+    expect(orchestrator.buildExecutionContext("problem_intelligence").userId).toBe(
+      "user-1",
+    );
+  });
+
+  it("leaves userId undefined when the project context doesn't carry one", () => {
+    const orchestrator = new PrismOrchestrator(context([]));
+
+    expect(
+      orchestrator.buildExecutionContext("problem_intelligence").userId,
+    ).toBeUndefined();
+  });
 });

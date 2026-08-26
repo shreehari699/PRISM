@@ -121,6 +121,7 @@ export class PrismOrchestrator {
       criteria: MODE_CRITERIA[this.context.mode],
       problemStatement: this.context.problemStatement,
       upstreamOutputs,
+      userId: this.context.userId,
     };
   }
 }

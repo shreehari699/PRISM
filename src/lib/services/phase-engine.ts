@@ -221,6 +221,7 @@ async function runOrRegenerate(
     mode: context.project.mode,
     problemStatement: context.problemStatement.raw_text,
     phases: context.phases.map(rowToPhaseState),
+    userId: params.userId,
   });
 
   const gate = orchestrator.canEnterPhase(params.phaseKey);
@@ -361,6 +362,7 @@ async function approvePhase(
     mode: context.project.mode,
     problemStatement: context.problemStatement.raw_text,
     phases: updatedPhases.map(rowToPhaseState),
+    userId: params.userId,
   });
   const nextActivePhase = orchestrator.getActivePhase();
 

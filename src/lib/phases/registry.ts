@@ -7,6 +7,10 @@ import type { AiProvider, AiResult } from "@/lib/ai/types";
 import type { PhaseExecutionContext } from "@/lib/orchestrator/types";
 import type { PrismPhaseKey } from "@/lib/prism/phases";
 import {
+  runExistingSolutionsPhase,
+  existingSolutionsAnalysisSchema,
+} from "@/lib/phases/existing-solutions";
+import {
   runStakeholderPainPhase,
   stakeholderPainAnalysisSchema,
 } from "@/lib/phases/stakeholder-pain";
@@ -38,6 +42,10 @@ const registry: Partial<Record<PrismPhaseKey, PhaseExecutor>> = {
   stakeholder_pain: {
     schema: stakeholderPainAnalysisSchema,
     execute: (context, provider) => runStakeholderPainPhase(context, provider),
+  },
+  existing_solutions: {
+    schema: existingSolutionsAnalysisSchema,
+    execute: (context, provider) => runExistingSolutionsPhase(context, provider),
   },
 };
 
