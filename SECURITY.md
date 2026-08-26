@@ -55,6 +55,11 @@ Two tiers of policy, by table:
 
 See `supabase/migrations/0007_row_level_security.sql` for the actual
 policies and `supabase/README.md` for the full table list.
+`src/lib/services/phase-engine.ts` is the reference implementation of
+this pattern: every read that decides whether a caller may act on a
+session/phase runs on the user-scoped client (so RLS enforces it), and
+only once that's proven does it use the admin client to write
+`analysis_phases` / `analysis_phase_history`.
 
 **Never rely exclusively on frontend authorization.** Every Route
 Handler / Server Action that mutates a service-role-only table must

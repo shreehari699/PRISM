@@ -7,6 +7,28 @@ import { getClientEnv } from "@/lib/config/env.client";
 
 import type { Database } from "./database.types";
 
+async function cookieAdapter() {
+  const cookieStore = await cookies();
+
+  return {
+    getAll() {
+      return cookieStore.getAll();
+    },
+    setAll(
+      cookiesToSet: { name: string; value: string; options?: Record<string, unknown> }[],
+    ) {
+      try {
+        for (const { name, value, options } of cookiesToSet) {
+          cookieStore.set(name, value, options);
+        }
+      } catch {
+        // Called from a Server Component — middleware refreshes the
+        // session instead. Safe to ignore.
+      }
+    },
+  };
+}
+
 /**
  * Supabase client for Server Components, Route Handlers, and Server
  * Actions. Still uses only the publishable key — requests are made as
@@ -20,27 +42,28 @@ import type { Database } from "./database.types";
  */
 export async function createClient() {
   const env = getClientEnv();
-  const cookieStore = await cookies();
 
   return createServerClient<Database>(
     env.NEXT_PUBLIC_SUPABASE_URL,
     env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
-    {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll();
-        },
-        setAll(cookiesToSet) {
-          try {
-            for (const { name, value, options } of cookiesToSet) {
-              cookieStore.set(name, value, options);
-            }
-          } catch {
-            // Called from a Server Component — middleware refreshes the
-            // session instead. Safe to ignore.
-          }
-        },
-      },
-    },
+    { cookies: await cookieAdapter() },
+  );
+}
+
+/**
+ * Same as `createClient`, but without the `Database` generic — for the
+ * same reason `createUntypedAdminClient` exists (see admin.ts):
+ * `database.types.ts` is currently a placeholder that doesn't enumerate
+ * real tables. Still runs as the authenticated user via their session
+ * cookie, so RLS still applies; only the TypeScript typing differs. Pair
+ * with a Zod schema at the call site (see src/lib/supabase/rows.ts).
+ */
+export async function createUntypedClient() {
+  const env = getClientEnv();
+
+  return createServerClient(
+    env.NEXT_PUBLIC_SUPABASE_URL,
+    env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+    { cookies: await cookieAdapter() },
   );
 }

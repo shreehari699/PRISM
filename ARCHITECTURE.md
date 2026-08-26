@@ -74,10 +74,69 @@ holds:
     project mode, that mode's evaluation criteria, the problem
     statement, and every upstream phase's output
 
-**(planned)** The actual per-phase system instructions, prompts, and
-Zod output schemas for each of the 15 agents — this foundation
-establishes where they plug in (`AiProvider.generateStructured`), not
-their content.
+**(planned)** The per-phase system instructions, prompts, and Zod output
+schemas for the 14 agents beyond the Problem Analyst (see §2a) — this
+foundation establishes where they plug in (`AiProvider.generateStructured`
+via the phase registry), not their content.
+
+### 2a. Phase engine and Phase 01 — Problem Intelligence
+
+The first fully wired vertical slice, and the pattern every later phase
+reuses:
+
+- **`src/lib/agents/problem-analyst/`** — the Problem Analyst. `schema.ts`
+  defines `problemAnatomySchema` (who/what/where/when/why, each an
+  `EvidenceClaim`, plus `clarity`, `openQuestions`, and a `problemScore`).
+  `prompt.ts` builds the system instruction and user prompt separately
+  from the executor so the persona reads as one place — critically, it
+  tells the model it has **no research at this phase**, so every
+  evidence claim must be `INFERENCE` or `ASSUMPTION`, never `VERIFIED`.
+  `index.ts` (`runProblemAnalyst`) calls `AiProvider.generateStructured`
+  with an injectable provider parameter purely for testability.
+- **`src/lib/phases/registry.ts`** — maps a `PrismPhaseKey` to its
+  `{ schema, execute }`. Only `problem_intelligence` is registered;
+  looking up any other phase returns `undefined` on purpose, which the
+  phase engine turns into an honest `not_implemented` (HTTP 501) rather
+  than a fake result.
+- **`src/lib/services/phase-engine.ts`** — the generic engine every
+  phase's `run` / `approve` / `regenerate` goes through:
+  - `run` — rejects if the phase already has output (use `regenerate`
+    instead), checks `PrismOrchestrator.canEnterPhase`, checks
+    `checkUsage` before spending an AI call, writes a `running` row,
+    invokes the registry executor, then persists `awaiting_approval` +
+    output on success or `failed` + `error_message` on any
+    `AiResult` failure — nothing is fabricated on failure.
+  - `regenerate` — same, but first archives the current output to
+    `analysis_phase_history` and bumps `version`; after a successful
+    regeneration, flags any already-run downstream phases
+    `needs_regeneration` via `orchestrator.getPhasesRequiringRegeneration`.
+  - `approve` — only from `awaiting_approval`; stamps `approved_at` /
+    `approved_by`, then advances `analysis_sessions.current_phase_key`
+    to the orchestrator's newly-computed active phase.
+  - Every write to `analysis_phases` / `analysis_phase_history` uses the
+    **admin** client (service-role-only per SECURITY.md); every read
+    that decides *whether* the caller may do so uses the **user-scoped**
+    client, so RLS — not this file's logic — is what actually proves
+    ownership before any admin write happens.
+- **`src/lib/services/investigations.ts`** — `createInvestigation`
+  creates `projects` → `problem_statements` → `analysis_sessions` in one
+  call, entirely on the user-scoped client (these three tables are
+  user-writable by design).
+- **`src/lib/supabase/rows.ts`** — Zod schemas for the DB rows the
+  services above read/write, since `database.types.ts` is still a
+  placeholder (§5). Every row from `createUntypedClient` /
+  `createUntypedAdminClient` is parsed through one of these rather than
+  trusted as `any`.
+- **API**: `POST /api/investigations` (start an investigation) and
+  `GET`/`POST /api/sessions/[sessionId]/phases/[phaseKey]` (read state /
+  dispatch `{ "action": "run" | "approve" | "regenerate" }`). Both
+  require a real Supabase-authenticated session — there is no dev
+  bypass, so they 401 until a sign-in flow exists.
+
+Phases 02–10 extend this by adding an entry to the agent registry and,
+where a phase needs more than one agent (e.g. Stakeholder Analyst + Pain
+Analyst for Phase 02), having that phase's `execute` internally call both
+and merge their output — the phase engine only ever sees one `AiResult`.
 
 ## 3. AI provider abstraction
 
@@ -152,10 +211,18 @@ every table — see `SECURITY.md` for the policy design.
   (still the publishable key — runs as the authenticated user, RLS
   enforces ownership)
 - `admin.ts` — service-role client, for the narrow set of operations
-  that must bypass RLS (e.g. usage tracking); every call site re-checks
-  ownership server-side before using it
+  that must bypass RLS (e.g. usage tracking, phase output); every call
+  site re-checks ownership server-side before using it. Also exports
+  `createUntypedAdminClient`/`DbClient` — see below.
 - `middleware.ts` + root `middleware.ts` — refreshes the auth session on
   every request
+- `rows.ts` — Zod row schemas + DTO mappers for tables not yet in
+  `database.types.ts`'s placeholder (projects, problem_statements,
+  analysis_sessions, analysis_phases). `createUntypedClient` (server.ts)
+  and `createUntypedAdminClient` (admin.ts) are the corresponding
+  clients without the `Database` generic — still RLS-enforced for the
+  former, service-role for the latter; only the TypeScript typing
+  differs from `createClient`/`createAdminClient`.
 
 ## 6. Usage tracking / free-tier safety
 
@@ -196,10 +263,17 @@ Per the scope of this foundation pass, the following are intentionally
 **not** implemented yet, so they aren't half-built:
 
 - Authentication UI / sign-in flow (Supabase Auth is wired at the
-  client/server/middleware level; no login page exists yet)
-- The problem-input flow (paste / PDF upload / idea / discover)
-- Per-phase agent system instructions and structured schemas beyond the
-  orchestrator plumbing described above
+  client/server/middleware level, and `/api/investigations` +
+  `/api/sessions/.../phases/...` genuinely require a real authenticated
+  session — but no login page exists yet, so there's currently no way to
+  obtain one through the UI)
+- Any investigation UI (problem input form, phase review/approval
+  screens, dossier view) — Phase 01 exists as a tested API + service
+  layer only; see §2a
+- Phases 02–10's agents, schemas, and prompts (the registry and engine
+  they plug into are done — see §2a)
+- PDF upload handling for the `pdf_upload` input method (the schema and
+  `source_file_url` column exist; nothing populates or reads a file yet)
 - The voice consultant and cinematic opening experience
 - The final Intelligence Dossier renderer
 - `serpapi` / `bing` research providers

@@ -58,3 +58,13 @@ export function createUntypedAdminClient() {
     },
   );
 }
+
+/**
+ * Shared type for "an untyped Supabase client" — what
+ * `createUntypedAdminClient` and `createUntypedClient` (server.ts) both
+ * return. Service functions that accept either an admin or a
+ * user-scoped client (the caller decides which by which factory it
+ * calls) type their parameter as `DbClient` rather than importing both
+ * factories' return types separately.
+ */
+export type DbClient = ReturnType<typeof createUntypedAdminClient>;
