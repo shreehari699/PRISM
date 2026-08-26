@@ -1,6 +1,19 @@
 import { z } from "zod";
 
 /**
+ * `.env` files routinely declare an unused optional variable as an empty
+ * string (`FOO=`) rather than omitting the line entirely. Treat that the
+ * same as unset, so an optional field's `.min(1)`/`.url()` validation
+ * doesn't reject a deployment that simply isn't using that variable.
+ */
+function optionalString<S extends z.ZodTypeAny>(schema: S) {
+  return z.preprocess(
+    (val) => (val === "" ? undefined : val),
+    schema.optional(),
+  );
+}
+
+/**
  * Variables safe to read in client components (must be prefixed
  * NEXT_PUBLIC_ by Next.js convention, which is what keeps them out of
  * server-only bundles from leaking the other direction).
@@ -12,7 +25,7 @@ export const publicEnvSchema = z.object({
   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: z
     .string()
     .min(1, "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY is required"),
-  NEXT_PUBLIC_APP_URL: z.url().optional(),
+  NEXT_PUBLIC_APP_URL: optionalString(z.url()),
 });
 
 export type PublicEnv = z.infer<typeof publicEnvSchema>;
@@ -37,9 +50,9 @@ export const serverEnvSchema = z.object({
   RESEARCH_PROVIDER: z
     .enum(["none", "tavily", "serpapi", "bing"])
     .default("none"),
-  TAVILY_API_KEY: z.string().min(1).optional(),
-  SERPAPI_API_KEY: z.string().min(1).optional(),
-  BING_SEARCH_API_KEY: z.string().min(1).optional(),
+  TAVILY_API_KEY: optionalString(z.string().min(1)),
+  SERPAPI_API_KEY: optionalString(z.string().min(1)),
+  BING_SEARCH_API_KEY: optionalString(z.string().min(1)),
 
   // Free-tier safety limits — configurable per deployment, never implicitly
   // unlimited. See src/lib/usage.

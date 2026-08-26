@@ -62,4 +62,19 @@ describe("serverEnvSchema", () => {
     });
     expect(result.USAGE_DAILY_AI_REQUEST_LIMIT).toBe(25);
   });
+
+  it("treats an empty-string optional variable as unset, not invalid", () => {
+    // .env files commonly declare an unused optional var as `FOO=`
+    // rather than omitting the line — this must not fail validation.
+    const result = serverEnvSchema.safeParse({
+      ...base,
+      SERPAPI_API_KEY: "",
+      BING_SEARCH_API_KEY: "",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.SERPAPI_API_KEY).toBeUndefined();
+      expect(result.data.BING_SEARCH_API_KEY).toBeUndefined();
+    }
+  });
 });
