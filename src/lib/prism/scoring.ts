@@ -9,13 +9,22 @@ export const scoreBasisSchema = z.enum(["ai_estimate", "heuristic"]);
 
 export type ScoreBasis = z.infer<typeof scoreBasisSchema>;
 
+/**
+ * A bounded qualitative scale, reused anywhere PRISM needs a judgment
+ * level without pretending to false numeric precision (score confidence,
+ * stakeholder influence/urgency/impact, etc.).
+ */
+export const qualitativeLevelSchema = z.enum(["low", "medium", "high"]);
+
+export type QualitativeLevel = z.infer<typeof qualitativeLevelSchema>;
+
 export const scoreSchema = z.object({
   /** 0-100. Not fake-precise: agents should reason in bands, not decimals. */
   value: z.number().min(0).max(100),
   basis: scoreBasisSchema,
   reasoning: z.string().min(1),
   /** How confident the scorer is in its own estimate — also honest, not padding. */
-  confidence: z.enum(["low", "medium", "high"]),
+  confidence: qualitativeLevelSchema,
 });
 
 export type Score = z.infer<typeof scoreSchema>;

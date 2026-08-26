@@ -94,6 +94,83 @@ function fakeProvider(
   };
 }
 
+/** For phases like stakeholder_pain whose executor calls the provider more than once. */
+function sequenceProvider(
+  results: Awaited<ReturnType<AiProvider["generateStructured"]>>[],
+): AiProvider {
+  const generateStructured = vi.fn();
+  for (const result of results) {
+    generateStructured.mockResolvedValueOnce(result);
+  }
+  return { name: "fake", model: "fake-model", generateStructured };
+}
+
+const validStakeholderOutput = {
+  stakeholders: [
+    {
+      localId: "farmer",
+      name: "Smallholder farmer",
+      category: "PRIMARY",
+      roles: ["USER"],
+      relationshipToProblem: { claim: "x", status: "INFERENCE", reasoning: "y" },
+      context: "ctx",
+      needs: [],
+      decisionPower: "none",
+      influence: "low",
+      urgency: "high",
+      impact: "high",
+      evidenceClaims: [],
+      confidence: "medium",
+    },
+  ],
+};
+
+const validPainOutput = {
+  painPoints: [
+    {
+      localId: "pain-1",
+      stakeholderLocalId: "farmer",
+      painTitle: "No price visibility",
+      description: "d",
+      cause: { claim: "x", status: "INFERENCE", reasoning: "y" },
+      frequency: { claim: "x", status: "UNKNOWN", reasoning: "y" },
+      riskIfUnsolved: { claim: "x", status: "ASSUMPTION", reasoning: "y" },
+      severityScore: {
+        dimensions: {
+          severity: 70,
+          frequency: 50,
+          reach: 40,
+          consequence: 60,
+          urgency: 55,
+          currentSolutionSatisfaction: 20,
+        },
+        overall: { value: 58, basis: "ai_estimate", reasoning: "n/a", confidence: "medium" },
+      },
+      confidence: "medium",
+    },
+  ],
+  primaryPain: { painLocalId: "pain-1", reasoning: "Root cause, not a symptom." },
+  secondaryPains: [],
+  downstreamConsequences: [],
+  customerDistinction: { applicable: false, notes: [] },
+  validationQuestions: ["How frequently does this occur?"],
+  realityCheck: {
+    stakeholderConfidence: "MODERATE",
+    painConfidence: "MODERATE",
+    primaryPainConfidence: "MODERATE",
+    evidenceCompleteness: "WEAK",
+    summary: "n/a",
+  },
+  consultantMessage: "The pain looks real but frequency is still unknown.",
+};
+
+const mergedStakeholderPainOutput = {
+  stakeholders: [
+    { ...validStakeholderOutput.stakeholders[0], painPointIds: ["pain-1"] },
+  ],
+  ...validPainOutput,
+};
+
 beforeEach(() => {
   checkUsageMock.mockReset();
   recordUsageMock.mockReset();
@@ -243,7 +320,12 @@ describe("executePhaseAction: run", () => {
       projects: [row(projectRow)],
       problem_statements: [row(problemStatementRow)],
       analysis_phases: [
-        rows([phaseRow({ status: "approved" })]), // problem_intelligence approved, unblocking stakeholder_pain
+        rows([
+          // Both implemented phases approved, unblocking existing_solutions
+          // (Phase 03), which has no registered agent yet.
+          phaseRow({ id: "phase-1", phase_key: "problem_intelligence", status: "approved" }),
+          phaseRow({ id: "phase-2", phase_key: "stakeholder_pain", status: "approved" }),
+        ]),
       ],
     });
     const admin = createMockDb({});
@@ -253,7 +335,7 @@ describe("executePhaseAction: run", () => {
       admin,
       userId: "user-1",
       sessionId: "session-1",
-      phaseKey: "stakeholder_pain",
+      phaseKey: "existing_solutions",
       action: "run",
     });
 
@@ -551,5 +633,323 @@ describe("executePhaseAction: database failure surfaces as a typed error", () =>
       expect(result.code).toBe("error");
       expect(result.message).toMatch(/connection reset/);
     }
+  });
+});
+
+describe("executePhaseAction: stakeholder_pain (Phase 02) depends on an approved Phase 01", () => {
+  it("blocks Phase 02 when Phase 01 has never run", async () => {
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [rows([])],
+    });
+    const admin = createMockDb({});
+    const provider = sequenceProvider([]);
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "stakeholder_pain",
+      action: "run",
+      aiProvider: provider,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("conflict");
+      expect(result.message).toMatch(/has not been run yet/);
+    }
+    expect(provider.generateStructured).not.toHaveBeenCalled();
+  });
+
+  it("blocks Phase 02 when Phase 01 is awaiting approval (unapproved)", async () => {
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [
+        rows([phaseRow({ status: "awaiting_approval", output_data: validAnatomy })]),
+      ],
+    });
+    const admin = createMockDb({});
+    const provider = sequenceProvider([]);
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "stakeholder_pain",
+      action: "run",
+      aiProvider: provider,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("conflict");
+      expect(result.message).toMatch(/awaiting your approval/);
+    }
+    expect(provider.generateStructured).not.toHaveBeenCalled();
+  });
+
+  it("blocks Phase 02 when Phase 01 is stale (needs_regeneration)", async () => {
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [
+        rows([
+          phaseRow({
+            status: "needs_regeneration",
+            output_data: validAnatomy,
+          }),
+        ]),
+      ],
+    });
+    const admin = createMockDb({});
+    const provider = sequenceProvider([]);
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "stakeholder_pain",
+      action: "run",
+      aiProvider: provider,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("conflict");
+    expect(provider.generateStructured).not.toHaveBeenCalled();
+  });
+
+  it("blocks Phase 02 when Phase 01 failed", async () => {
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [rows([phaseRow({ status: "failed" })])],
+    });
+    const admin = createMockDb({});
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "stakeholder_pain",
+      action: "run",
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("conflict");
+      expect(result.message).toMatch(/failed/);
+    }
+  });
+
+  it("runs Phase 02 successfully once Phase 01 is approved, charging exactly one AI request", async () => {
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [
+        rows([phaseRow({ status: "approved", output_data: validAnatomy })]),
+      ],
+    });
+    const admin = createMockDb({
+      analysis_phases: [
+        row(phaseRow({ phase_key: "stakeholder_pain", status: "running" })),
+        row(
+          phaseRow({
+            phase_key: "stakeholder_pain",
+            status: "awaiting_approval",
+            output_data: mergedStakeholderPainOutput,
+          }),
+        ),
+      ],
+    });
+    const provider = sequenceProvider([
+      { status: "ok", model: "fake-model", data: validStakeholderOutput, usage: { totalTokens: 100 } },
+      { status: "ok", model: "fake-model", data: validPainOutput, usage: { totalTokens: 200 } },
+    ]);
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "stakeholder_pain",
+      action: "run",
+      aiProvider: provider,
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.status).toBe("awaiting_approval");
+      expect(result.data.outputData).toEqual(mergedStakeholderPainOutput);
+    }
+    expect(provider.generateStructured).toHaveBeenCalledTimes(2);
+    expect(checkUsageMock).toHaveBeenCalledTimes(1);
+    expect(checkUsageMock).toHaveBeenCalledWith("user-1", "ai");
+    expect(recordUsageMock).toHaveBeenCalledTimes(1);
+    expect(recordUsageMock).toHaveBeenCalledWith("user-1", "ai", 300);
+  });
+
+  it("marks Phase 02 failed (not fabricated) when the second agent call returns invalid_output", async () => {
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [
+        rows([phaseRow({ status: "approved", output_data: validAnatomy })]),
+      ],
+    });
+    const admin = createMockDb({
+      analysis_phases: [
+        row(phaseRow({ phase_key: "stakeholder_pain", status: "running" })),
+        noRow,
+      ],
+    });
+    const provider = sequenceProvider([
+      { status: "ok", model: "fake-model", data: validStakeholderOutput },
+      { status: "invalid_output", message: "Pain Analyst output failed schema validation", raw: "{}" },
+    ]);
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "stakeholder_pain",
+      action: "run",
+      aiProvider: provider,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("error");
+      expect(result.message).toMatch(/schema validation/);
+    }
+  });
+
+  it("never spends an AI call once the usage limit is reached, even for a two-agent phase", async () => {
+    checkUsageMock.mockResolvedValue({
+      allowed: false,
+      safeMode: true,
+      reason: "Daily ai request limit reached (50/day).",
+      remaining: { daily: 0, monthly: 10 },
+    });
+
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [
+        rows([phaseRow({ status: "approved", output_data: validAnatomy })]),
+      ],
+    });
+    const admin = createMockDb({});
+    const provider = sequenceProvider([
+      { status: "ok", model: "x", data: validStakeholderOutput },
+      { status: "ok", model: "x", data: validPainOutput },
+    ]);
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "stakeholder_pain",
+      action: "run",
+      aiProvider: provider,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("unavailable");
+    expect(provider.generateStructured).not.toHaveBeenCalled();
+  });
+
+  it("returns not_found for a session the caller doesn't own, same as any other phase", async () => {
+    const supabase = createMockDb({ analysis_sessions: [noRow] });
+    const admin = createMockDb({});
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "missing",
+      phaseKey: "stakeholder_pain",
+      action: "run",
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("not_found");
+  });
+
+  it("regenerating an approved Phase 01 flags an already-approved Phase 02 as needs_regeneration", async () => {
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [
+        rows([
+          phaseRow({
+            id: "phase-1",
+            phase_key: "problem_intelligence",
+            status: "approved",
+            version: 1,
+            output_data: validAnatomy,
+          }),
+          phaseRow({
+            id: "phase-2",
+            phase_key: "stakeholder_pain",
+            status: "approved",
+            version: 1,
+            output_data: mergedStakeholderPainOutput,
+          }),
+        ]),
+      ],
+    });
+    const admin = createMockDb({
+      analysis_phase_history: [noRow],
+      analysis_phases: [
+        row(phaseRow({ id: "phase-1", status: "running", version: 2 })),
+        row(
+          phaseRow({
+            id: "phase-1",
+            status: "awaiting_approval",
+            version: 2,
+            output_data: { ...validAnatomy, restatement: "updated" },
+          }),
+        ),
+        noRow, // the bulk update marking stakeholder_pain needs_regeneration
+      ],
+    });
+    const provider = fakeProvider({
+      status: "ok",
+      model: "fake-model",
+      data: { ...validAnatomy, restatement: "updated" },
+    });
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "problem_intelligence",
+      action: "regenerate",
+      aiProvider: provider,
+    });
+
+    expect(result.ok).toBe(true);
+    const analysisPhaseCalls = (
+      admin.from as unknown as ReturnType<typeof vi.fn>
+    ).mock.calls.filter((call: unknown[]) => call[0] === "analysis_phases");
+    expect(analysisPhaseCalls).toHaveLength(3);
   });
 });

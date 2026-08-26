@@ -75,11 +75,12 @@ holds:
     statement, and every upstream phase's output
 
 **(planned)** The per-phase system instructions, prompts, and Zod output
-schemas for the 14 agents beyond the Problem Analyst (see §2a) — this
-foundation establishes where they plug in (`AiProvider.generateStructured`
-via the phase registry), not their content.
+schemas for the 12 agents beyond the Problem Analyst, Stakeholder
+Analyst, and Pain Analyst (see §2a/§2b) — this foundation establishes
+where they plug in (`AiProvider.generateStructured` via the phase
+registry), not their content.
 
-### 2a. Phase engine and Phase 01 — Problem Intelligence
+### 2a. Phase engine and Phase 01 — Problem Intelligence (reference implementation)
 
 The first fully wired vertical slice, and the pattern every later phase
 reuses:
@@ -94,10 +95,10 @@ reuses:
   `index.ts` (`runProblemAnalyst`) calls `AiProvider.generateStructured`
   with an injectable provider parameter purely for testability.
 - **`src/lib/phases/registry.ts`** — maps a `PrismPhaseKey` to its
-  `{ schema, execute }`. Only `problem_intelligence` is registered;
-  looking up any other phase returns `undefined` on purpose, which the
-  phase engine turns into an honest `not_implemented` (HTTP 501) rather
-  than a fake result.
+  `{ schema, execute }`. Only `problem_intelligence` and
+  `stakeholder_pain` are registered; looking up any other phase returns
+  `undefined` on purpose, which the phase engine turns into an honest
+  `not_implemented` (HTTP 501) rather than a fake result.
 - **`src/lib/services/phase-engine.ts`** — the generic engine every
   phase's `run` / `approve` / `regenerate` goes through:
   - `run` — rejects if the phase already has output (use `regenerate`
@@ -133,10 +134,76 @@ reuses:
   require a real Supabase-authenticated session — there is no dev
   bypass, so they 401 until a sign-in flow exists.
 
-Phases 02–10 extend this by adding an entry to the agent registry and,
-where a phase needs more than one agent (e.g. Stakeholder Analyst + Pain
-Analyst for Phase 02), having that phase's `execute` internally call both
-and merge their output — the phase engine only ever sees one `AiResult`.
+### 2b. Phase 02 — Stakeholder & Pain Intelligence
+
+The first phase to actually exercise the "more than one agent per
+phase" pattern §2a anticipated, and to depend on a prior phase's output
+rather than only the raw problem statement:
+
+- **`src/lib/agents/stakeholder-analyst/`** — identifies every
+  stakeholder implicated by the *approved* Phase 01 output. Produces a
+  `DraftStakeholder[]` with a tier (`PRIMARY`/`SECONDARY`/`TERTIARY`), one
+  or more roles (`USER`, `CONSUMER`, `BUYER`, `BENEFICIARY`, `OPERATOR`,
+  `DECISION_MAKER`, `INFLUENCER`, `REGULATOR`, `IMPLEMENTER`,
+  `AFFECTED_PARTY`), and a `decisionPower` on a four-level scale
+  (`none`/`low`/`medium`/`high`) — `none` is a distinct, legitimate
+  answer, not a euphemism for `low`, which is what actually lets the
+  phase draw a real user-vs-buyer-vs-beneficiary distinction instead of
+  flattening everyone onto the same 3-point scale. The prompt requires
+  preserving any evidence status Phase 01 already assigned rather than
+  silently upgrading or downgrading it.
+- **`src/lib/agents/pain-analyst/`** — takes the problem anatomy *and*
+  the draft stakeholder list as input and produces each stakeholder's
+  pain, a `severityScore` per pain (raw 0-100 `dimensions` — severity,
+  frequency, reach, consequence, urgency, currentSolutionSatisfaction —
+  always bundled with an `overall: Score` whose `reasoning` must explain
+  the number, never a bare comparative estimate presented as a
+  measurement), which single pain is `primaryPain` (with mandatory
+  reasoning about whether it's the real pain or a downstream symptom),
+  `customerDistinction` (only `applicable: true` when this problem
+  actually has divergent user/customer/buyer/beneficiary/operator
+  roles), problem-specific `validationQuestions`, an honest
+  `realityCheck` (four `ConfidenceLevel` ratings, where
+  `INSUFFICIENT_EVIDENCE` is a first-class expected answer, not a
+  failure), and a `consultantMessage` generated fresh from this
+  analysis's actual findings.
+- **`src/lib/phases/stakeholder-pain/`** — the composer. Calls the
+  Stakeholder Analyst, then the Pain Analyst grounded in its output,
+  then merges them into the final `StakeholderPainAnalysis`. It does
+  **not** trust either model call to keep cross-references consistent:
+  every stakeholder's `painPointIds` is *computed* from the Pain
+  Analyst's `stakeholderLocalId` references (never asked of the model
+  twice), and every reference — pain → stakeholder,
+  `primaryPain`/`secondaryPains` → pain — is checked to actually resolve
+  before the merged result is accepted; an unresolvable reference comes
+  back as `invalid_output`, the same failure class a malformed JSON
+  response would produce. Combined token usage from both calls is
+  reported as a single `AiUsage`, so the phase engine's `checkUsage` /
+  `recordUsage` treat one phase `run` as one billable unit regardless of
+  how many model calls it took internally.
+- **Dependency on Phase 01**: enforced entirely by the existing,
+  unmodified `PrismOrchestrator.canEnterPhase` — Phase 02 cannot run
+  until the `problem_intelligence` phase row is `approved`; missing,
+  `awaiting_approval`, `needs_regeneration` (stale), or `failed` upstream
+  states all produce the same `conflict` result Phase 01→02 gating
+  already had tests for. No phase-02-specific gating code exists.
+- **Persistence**: stored entirely in `analysis_phases.output_data`
+  (jsonb), the same as Phase 01 — the normalized `stakeholders` /
+  `pain_points` tables already in the schema are **not** populated by
+  this pass. They're a reasonable target for a future cross-phase
+  reporting/query layer, but populating them now would mean keeping two
+  representations in sync for no requirement this phase actually has;
+  the jsonb blob alone already satisfies persistence, RLS, approval, and
+  regeneration.
+- **Registered** in `src/lib/phases/registry.ts` exactly like Phase 01 —
+  no new API routes, no route changes. `run` / `approve` / `regenerate`
+  for `stakeholder_pain` go through the same
+  `POST /api/sessions/[sessionId]/phases/[phaseKey]` endpoint.
+
+Phases 03–10 extend this the same way: add an entry to the agent
+registry, and where a phase needs more than one agent, have that
+phase's `execute` internally call each and merge their output — the
+phase engine only ever sees one `AiResult`.
 
 ## 3. AI provider abstraction
 
@@ -268,10 +335,14 @@ Per the scope of this foundation pass, the following are intentionally
   session — but no login page exists yet, so there's currently no way to
   obtain one through the UI)
 - Any investigation UI (problem input form, phase review/approval
-  screens, dossier view) — Phase 01 exists as a tested API + service
-  layer only; see §2a
-- Phases 02–10's agents, schemas, and prompts (the registry and engine
-  they plug into are done — see §2a)
+  screens, dossier view, stakeholder/pain relationship graph) — Phases
+  01 and 02 exist as tested API + service layer only; see §2a/§2b. The
+  stakeholder/pain data model is built to support a future network-graph
+  view (`painPointIds` on each stakeholder), but no visual graph exists.
+- Phases 03–10's agents, schemas, and prompts (the registry and engine
+  they plug into are done — see §2a/§2b)
+- Populating the normalized `stakeholders` / `pain_points` tables from
+  Phase 02 output (currently jsonb-only — see §2b)
 - PDF upload handling for the `pdf_upload` input method (the schema and
   `source_file_url` column exist; nothing populates or reads a file yet)
 - The voice consultant and cinematic opening experience

@@ -6,6 +6,10 @@ import { runProblemAnalyst, problemAnatomySchema } from "@/lib/agents/problem-an
 import type { AiProvider, AiResult } from "@/lib/ai/types";
 import type { PhaseExecutionContext } from "@/lib/orchestrator/types";
 import type { PrismPhaseKey } from "@/lib/prism/phases";
+import {
+  runStakeholderPainPhase,
+  stakeholderPainAnalysisSchema,
+} from "@/lib/phases/stakeholder-pain";
 
 /**
  * One entry per PRISM phase that has an implemented agent. A phase
@@ -30,6 +34,10 @@ const registry: Partial<Record<PrismPhaseKey, PhaseExecutor>> = {
   problem_intelligence: {
     schema: problemAnatomySchema,
     execute: (context, provider) => runProblemAnalyst(context, provider),
+  },
+  stakeholder_pain: {
+    schema: stakeholderPainAnalysisSchema,
+    execute: (context, provider) => runStakeholderPainPhase(context, provider),
   },
 };
 
