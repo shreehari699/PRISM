@@ -1,7 +1,7 @@
 import { z } from "zod";
 
-import { evidenceStatusSchema } from "@/lib/prism/evidence";
-import { qualitativeLevelSchema, scoreSchema } from "@/lib/prism/scoring";
+import { richEvidenceClaimSchema, type RichEvidenceClaim } from "@/lib/prism/evidence";
+import { scoreSchema } from "@/lib/prism/scoring";
 
 /**
  * Phase 04's own 4-tier confidence vocabulary. Conceptually the same
@@ -20,31 +20,13 @@ export type GapConfidenceLevel = z.infer<typeof gapConfidenceLevelSchema>;
  * confidence, richer than the shared `EvidenceClaim` (which has a
  * single optional `sourceId` and no confidence of its own) — this
  * phase's spec explicitly wants `source_ids` (plural) and `confidence`
- * on every claim. Reuses `EvidenceStatus` unchanged; a `VERIFIED` claim
- * without any cited source is rejected here at the schema level — "real
- * source" (does the ID actually exist) is checked one layer up, by the
- * phase composer, which is the only place that has the actual source
- * list to check against.
+ * on every claim. This is `richEvidenceClaimSchema` from
+ * prism/evidence.ts (introduced here for Phase 04, later reused
+ * unchanged by Phase 05) re-exported under this phase's original name
+ * so nothing else in this module has to change.
  */
-export const gapEvidenceClaimSchema = z
-  .object({
-    claim: z.string().min(1),
-    status: evidenceStatusSchema,
-    sourceIds: z.array(z.string().min(1)).default([]),
-    confidence: qualitativeLevelSchema,
-    reasoning: z.string().min(1),
-  })
-  .superRefine((claim, ctx) => {
-    if (claim.status === "VERIFIED" && claim.sourceIds.length === 0) {
-      ctx.addIssue({
-        code: "custom",
-        message: "A VERIFIED claim must cite at least one source id.",
-        path: ["sourceIds"],
-      });
-    }
-  });
-
-export type GapEvidenceClaim = z.infer<typeof gapEvidenceClaimSchema>;
+export const gapEvidenceClaimSchema = richEvidenceClaimSchema;
+export type GapEvidenceClaim = RichEvidenceClaim;
 
 export const gapTypeSchema = z.enum([
   "FUNCTIONAL",

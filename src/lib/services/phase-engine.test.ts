@@ -354,12 +354,13 @@ describe("executePhaseAction: run", () => {
       analysis_phases: [
         rows([
           // Every implemented phase approved, unblocking
-          // opportunity_innovation (Phase 05), which has no registered
+          // market_investment (Phase 06), which has no registered
           // agent yet.
           phaseRow({ id: "phase-1", phase_key: "problem_intelligence", status: "approved" }),
           phaseRow({ id: "phase-2", phase_key: "stakeholder_pain", status: "approved" }),
           phaseRow({ id: "phase-3", phase_key: "existing_solutions", status: "approved" }),
           phaseRow({ id: "phase-4", phase_key: "gap_intelligence", status: "approved" }),
+          phaseRow({ id: "phase-5", phase_key: "opportunity_innovation", status: "approved" }),
         ]),
       ],
     });
@@ -370,7 +371,7 @@ describe("executePhaseAction: run", () => {
       admin,
       userId: "user-1",
       sessionId: "session-1",
-      phaseKey: "opportunity_innovation",
+      phaseKey: "market_investment",
       action: "run",
     });
 
@@ -2121,6 +2122,662 @@ describe("executePhaseAction: gap_intelligence (Phase 04) depends on approved Ph
       userId: "user-1",
       sessionId: "session-1",
       phaseKey: "existing_solutions",
+      action: "regenerate",
+      aiProvider: provider,
+    });
+
+    expect(result.ok).toBe(true);
+    const analysisPhaseCalls = (
+      admin.from as unknown as ReturnType<typeof vi.fn>
+    ).mock.calls.filter((call: unknown[]) => call[0] === "analysis_phases");
+    expect(analysisPhaseCalls).toHaveLength(3);
+  });
+});
+
+const mergedGapIntelligenceOutput = {
+  problemSummary: "s",
+  stakeholderSummary: "s",
+  solutionLandscapeSummary: "s",
+  gapCandidates: validGapAgentOutput.gapCandidates,
+  confirmedGaps: [],
+  candidateGaps: ["gap-1"],
+  unverifiedGaps: [],
+  noGapFindings: [],
+  coverageMatrix: [],
+  gapPriority: [],
+  gapRealityCheck: { signal: "MODERATE_GAP_SIGNAL", explanation: "e" },
+  validationQuestions: ["Does the platform support offline use?"],
+  evidenceSummary: { totalSourcesReferenced: 1, verifiedClaimsCount: 0, narrative: "n" },
+  confidenceSummary: { overallConfidence: "MEDIUM", narrative: "n" },
+  consultantMessage: "m",
+};
+
+function opportunityClaim(
+  status: "VERIFIED" | "INFERENCE" | "ASSUMPTION" | "UNKNOWN" = "INFERENCE",
+  sourceIds: string[] = [],
+) {
+  return { claim: "x", status, sourceIds, confidence: "medium", reasoning: "y" };
+}
+
+const validOpportunityAgentOutput = {
+  opportunities: [
+    {
+      opportunityId: "opp-1",
+      title: "District-level price transparency service",
+      description: "d",
+      unservedNeed: opportunityClaim("INFERENCE"),
+      affectedStakeholders: ["farmer"],
+      relatedPains: ["pain-1"],
+      relatedGaps: ["gap-1"],
+      existingSolutionContext: opportunityClaim("ASSUMPTION"),
+      whyNow: { factors: [], summary: "s" },
+      impact: [],
+      valuePotential: { value: 60, basis: "ai_estimate", reasoning: "n/a", confidence: "medium" },
+      impactPotential: { value: 55, basis: "ai_estimate", reasoning: "n/a", confidence: "medium" },
+      evidenceClaims: [],
+      confidence: "medium",
+      opportunityState: "PROMISING_OPPORTUNITY",
+    },
+  ],
+};
+
+const validInnovationAgentOutput = {
+  assessments: [
+    {
+      opportunityId: "opp-1",
+      innovationDirections: [
+        {
+          directionType: "SOFTWARE",
+          whyItCouldAddressTheGap: "a",
+          whatItWouldChange: "b",
+          stakeholderBenefit: "c",
+          newCapability: "d",
+          assumptionsRequired: [],
+          aiJustification: { classification: "AI_OPTIONAL", reasoning: "e" },
+        },
+      ],
+      differentiation: opportunityClaim("ASSUMPTION"),
+      innovationPotential: { value: 55, basis: "ai_estimate", reasoning: "n/a", confidence: "medium" },
+      feasibilityPotential: { value: 50, basis: "ai_estimate", reasoning: "n/a", confidence: "medium" },
+      refinedOpportunityState: "PROMISING_OPPORTUNITY",
+      validationQuestions: [],
+    },
+  ],
+  opportunityLandscape: [
+    {
+      opportunityId: "opp-1",
+      stakeholderValue: "medium",
+      painRelevance: "medium",
+      gapStrength: "medium",
+      differentiationStrength: "low",
+      innovationStrength: "medium",
+      feasibilityStrength: "high",
+      impactStrength: "medium",
+      confidence: "medium",
+      reasoning: "n/a",
+    },
+  ],
+  opportunityRealityCheck: { signal: "PROMISING", explanation: "e" },
+  consultantMessage: "m",
+};
+
+const approvedPhasesThroughGapIntelligence = [
+  phaseRow({
+    id: "phase-1",
+    phase_key: "problem_intelligence",
+    status: "approved",
+    output_data: validAnatomy,
+  }),
+  phaseRow({
+    id: "phase-2",
+    phase_key: "stakeholder_pain",
+    status: "approved",
+    output_data: mergedStakeholderPainOutput,
+  }),
+  phaseRow({
+    id: "phase-3",
+    phase_key: "existing_solutions",
+    status: "approved",
+    output_data: mergedExistingSolutionsOutput,
+  }),
+  phaseRow({
+    id: "phase-4",
+    phase_key: "gap_intelligence",
+    status: "approved",
+    output_data: mergedGapIntelligenceOutput,
+  }),
+];
+
+describe("executePhaseAction: opportunity_innovation (Phase 05) depends on approved Phase 01, 02, 04 AND has-run Phase 03", () => {
+  it("blocks Phase 05 when Phase 04 has never run", async () => {
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [
+        rows([
+          phaseRow({
+            id: "phase-1",
+            phase_key: "problem_intelligence",
+            status: "approved",
+            output_data: validAnatomy,
+          }),
+          phaseRow({
+            id: "phase-2",
+            phase_key: "stakeholder_pain",
+            status: "approved",
+            output_data: mergedStakeholderPainOutput,
+          }),
+          phaseRow({
+            id: "phase-3",
+            phase_key: "existing_solutions",
+            status: "approved",
+            output_data: mergedExistingSolutionsOutput,
+          }),
+        ]),
+      ],
+    });
+    const admin = createMockDb({});
+    const provider = sequenceProvider([]);
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "opportunity_innovation",
+      action: "run",
+      aiProvider: provider,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("conflict");
+      expect(result.message).toMatch(/has not been run yet/);
+    }
+    expect(provider.generateStructured).not.toHaveBeenCalled();
+  });
+
+  it("blocks Phase 05 when Phase 02 (an approval-gated upstream phase) is unapproved", async () => {
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [
+        rows([
+          phaseRow({
+            id: "phase-1",
+            phase_key: "problem_intelligence",
+            status: "approved",
+            output_data: validAnatomy,
+          }),
+          phaseRow({
+            id: "phase-2",
+            phase_key: "stakeholder_pain",
+            status: "awaiting_approval",
+            output_data: mergedStakeholderPainOutput,
+          }),
+          phaseRow({
+            id: "phase-3",
+            phase_key: "existing_solutions",
+            status: "approved",
+            output_data: mergedExistingSolutionsOutput,
+          }),
+          phaseRow({
+            id: "phase-4",
+            phase_key: "gap_intelligence",
+            status: "approved",
+            output_data: mergedGapIntelligenceOutput,
+          }),
+        ]),
+      ],
+    });
+    const admin = createMockDb({});
+    const provider = sequenceProvider([]);
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "opportunity_innovation",
+      action: "run",
+      aiProvider: provider,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("conflict");
+      expect(result.message).toMatch(/awaiting your approval/);
+    }
+    expect(provider.generateStructured).not.toHaveBeenCalled();
+  });
+
+  it("blocks Phase 05 when Phase 04 (an approval-gated upstream phase) is stale (needs_regeneration)", async () => {
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [
+        rows([
+          ...approvedPhasesThroughGapIntelligence.slice(0, 3),
+          phaseRow({
+            id: "phase-4",
+            phase_key: "gap_intelligence",
+            status: "needs_regeneration",
+            output_data: mergedGapIntelligenceOutput,
+          }),
+        ]),
+      ],
+    });
+    const admin = createMockDb({});
+    const provider = sequenceProvider([]);
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "opportunity_innovation",
+      action: "run",
+      aiProvider: provider,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("conflict");
+    expect(provider.generateStructured).not.toHaveBeenCalled();
+  });
+
+  // existing_solutions (Phase 03) has requiresApproval: false — the same
+  // unmodified gating that Phase 04 relies on applies unchanged to
+  // Phase 05: Phase 03 only has to have run, not be explicitly approved.
+  it("allows Phase 05 to run while Phase 03 is only awaiting approval, since existing_solutions doesn't require it", async () => {
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [
+        rows([
+          phaseRow({
+            id: "phase-1",
+            phase_key: "problem_intelligence",
+            status: "approved",
+            output_data: validAnatomy,
+          }),
+          phaseRow({
+            id: "phase-2",
+            phase_key: "stakeholder_pain",
+            status: "approved",
+            output_data: mergedStakeholderPainOutput,
+          }),
+          phaseRow({
+            id: "phase-3",
+            phase_key: "existing_solutions",
+            status: "awaiting_approval",
+            output_data: mergedExistingSolutionsOutput,
+          }),
+          phaseRow({
+            id: "phase-4",
+            phase_key: "gap_intelligence",
+            status: "approved",
+            output_data: mergedGapIntelligenceOutput,
+          }),
+        ]),
+      ],
+    });
+    const admin = createMockDb({
+      analysis_phases: [
+        row(phaseRow({ id: "phase-5", phase_key: "opportunity_innovation", status: "running" })),
+        row(phaseRow({ id: "phase-5", phase_key: "opportunity_innovation", status: "awaiting_approval" })),
+      ],
+    });
+    const provider = sequenceProvider([
+      { status: "ok", model: "fake-model", data: validOpportunityAgentOutput },
+      { status: "ok", model: "fake-model", data: validInnovationAgentOutput },
+    ]);
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "opportunity_innovation",
+      action: "run",
+      aiProvider: provider,
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("blocks Phase 05 when Phase 03 failed", async () => {
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [
+        rows([
+          phaseRow({
+            id: "phase-1",
+            phase_key: "problem_intelligence",
+            status: "approved",
+            output_data: validAnatomy,
+          }),
+          phaseRow({
+            id: "phase-2",
+            phase_key: "stakeholder_pain",
+            status: "approved",
+            output_data: mergedStakeholderPainOutput,
+          }),
+          phaseRow({
+            id: "phase-3",
+            phase_key: "existing_solutions",
+            status: "failed",
+          }),
+          phaseRow({
+            id: "phase-4",
+            phase_key: "gap_intelligence",
+            status: "approved",
+            output_data: mergedGapIntelligenceOutput,
+          }),
+        ]),
+      ],
+    });
+    const admin = createMockDb({});
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "opportunity_innovation",
+      action: "run",
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("conflict");
+      expect(result.message).toMatch(/failed/);
+    }
+  });
+
+  it("runs Phase 05 successfully once Phase 01, 02, 03, and 04 have all cleared their gates, charging exactly one AI usage unit for both agent calls", async () => {
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [rows(approvedPhasesThroughGapIntelligence)],
+    });
+    const admin = createMockDb({
+      analysis_phases: [
+        row(phaseRow({ id: "phase-5", phase_key: "opportunity_innovation", status: "running" })),
+        row(phaseRow({ id: "phase-5", phase_key: "opportunity_innovation", status: "awaiting_approval" })),
+      ],
+    });
+    const provider = sequenceProvider([
+      { status: "ok", model: "fake-model", data: validOpportunityAgentOutput },
+      { status: "ok", model: "fake-model", data: validInnovationAgentOutput },
+    ]);
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "opportunity_innovation",
+      action: "run",
+      aiProvider: provider,
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data.status).toBe("awaiting_approval");
+    expect(provider.generateStructured).toHaveBeenCalledTimes(2);
+    expect(checkUsageMock).toHaveBeenCalledTimes(1);
+    expect(checkUsageMock).toHaveBeenCalledWith("user-1", "ai");
+    expect(recordUsageMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks Phase 05 failed (not fabricated) when the Opportunity Agent returns invalid_output", async () => {
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [rows(approvedPhasesThroughGapIntelligence)],
+    });
+    const admin = createMockDb({
+      analysis_phases: [
+        row(phaseRow({ id: "phase-5", phase_key: "opportunity_innovation", status: "running" })),
+        noRow,
+      ],
+    });
+    const provider = sequenceProvider([
+      { status: "invalid_output", message: "bad json", raw: "{}" },
+    ]);
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "opportunity_innovation",
+      action: "run",
+      aiProvider: provider,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("error");
+  });
+
+  it("marks Phase 05 failed when the Opportunity Agent's output references a gap the pipeline never produced", async () => {
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [rows(approvedPhasesThroughGapIntelligence)],
+    });
+    const admin = createMockDb({
+      analysis_phases: [
+        row(phaseRow({ id: "phase-5", phase_key: "opportunity_innovation", status: "running" })),
+        noRow,
+      ],
+    });
+    const provider = sequenceProvider([
+      {
+        status: "ok",
+        model: "fake-model",
+        data: {
+          opportunities: [
+            {
+              ...validOpportunityAgentOutput.opportunities[0],
+              relatedGaps: ["ghost-gap"],
+            },
+          ],
+        },
+      },
+    ]);
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "opportunity_innovation",
+      action: "run",
+      aiProvider: provider,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("error");
+  });
+
+  it("never spends an AI call once the usage limit is reached", async () => {
+    checkUsageMock.mockResolvedValue({
+      allowed: false,
+      safeMode: true,
+      reason: "Daily ai request limit reached (50/day).",
+      remaining: { daily: 0, monthly: 10 },
+    });
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [rows(approvedPhasesThroughGapIntelligence)],
+    });
+    const admin = createMockDb({});
+    const provider = sequenceProvider([]);
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "opportunity_innovation",
+      action: "run",
+      aiProvider: provider,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("unavailable");
+    expect(provider.generateStructured).not.toHaveBeenCalled();
+  });
+
+  it("returns not_found for a session the caller doesn't own", async () => {
+    const supabase = createMockDb({ analysis_sessions: [noRow] });
+    const admin = createMockDb({});
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "missing",
+      phaseKey: "opportunity_innovation",
+      action: "run",
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("not_found");
+  });
+
+  it("regenerates an approved Phase 05, archiving history and bumping the version", async () => {
+    const priorOutput = {
+      opportunities: [],
+      opportunityLandscape: [],
+      opportunityRealityCheck: { signal: "INSUFFICIENT_EVIDENCE", explanation: "old" },
+      overallFinding: "NO_MEANINGFUL_OPPORTUNITY",
+      consultantMessage: "old",
+    };
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [
+        rows([
+          ...approvedPhasesThroughGapIntelligence,
+          phaseRow({
+            id: "phase-5",
+            phase_key: "opportunity_innovation",
+            status: "approved",
+            version: 1,
+            output_data: priorOutput,
+          }),
+        ]),
+      ],
+    });
+    const admin = createMockDb({
+      analysis_phase_history: [noRow],
+      analysis_phases: [
+        row(
+          phaseRow({
+            id: "phase-5",
+            phase_key: "opportunity_innovation",
+            status: "running",
+            version: 2,
+          }),
+        ),
+        row(
+          phaseRow({
+            id: "phase-5",
+            phase_key: "opportunity_innovation",
+            status: "awaiting_approval",
+            version: 2,
+          }),
+        ),
+      ],
+    });
+    const provider = sequenceProvider([
+      { status: "ok", model: "fake-model", data: validOpportunityAgentOutput },
+      { status: "ok", model: "fake-model", data: validInnovationAgentOutput },
+    ]);
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "opportunity_innovation",
+      action: "regenerate",
+      aiProvider: provider,
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data.version).toBe(2);
+  });
+
+  it("regenerating an approved Phase 04 flags an already-approved Phase 05 as needs_regeneration", async () => {
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [
+        rows([
+          ...approvedPhasesThroughGapIntelligence.slice(0, 3),
+          phaseRow({
+            id: "phase-4",
+            phase_key: "gap_intelligence",
+            status: "approved",
+            version: 1,
+            output_data: mergedGapIntelligenceOutput,
+          }),
+          phaseRow({
+            id: "phase-5",
+            phase_key: "opportunity_innovation",
+            status: "approved",
+            output_data: {
+              opportunities: [],
+              opportunityLandscape: [],
+              opportunityRealityCheck: { signal: "INSUFFICIENT_EVIDENCE", explanation: "old" },
+              overallFinding: "NO_MEANINGFUL_OPPORTUNITY",
+              consultantMessage: "old",
+            },
+          }),
+        ]),
+      ],
+    });
+    const admin = createMockDb({
+      analysis_phase_history: [noRow],
+      analysis_phases: [
+        row(phaseRow({ id: "phase-4", phase_key: "gap_intelligence", status: "running", version: 2 })),
+        row(
+          phaseRow({
+            id: "phase-4",
+            phase_key: "gap_intelligence",
+            status: "awaiting_approval",
+            version: 2,
+            output_data: mergedGapIntelligenceOutput,
+          }),
+        ),
+        noRow, // bulk update marking opportunity_innovation needs_regeneration
+      ],
+    });
+    const provider = sequenceProvider([
+      { status: "ok", model: "fake-model", data: validGapAgentOutput },
+    ]);
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "gap_intelligence",
       action: "regenerate",
       aiProvider: provider,
     });

@@ -60,7 +60,8 @@ holds:
   Agent, Existing Solution Agent, Gap Agent, Opportunity Agent,
   Innovation Agent, Market Agent, Investment Agent, Feasibility Agent,
   Solution Consultant, Validation Agent, Jury Agent, Report Generator),
-  each mapped to the phase it belongs to.
+  each mapped to the phase it belongs to. The first eight of these are
+  implemented (see §2a/§2b/§2c/§2d/§2e).
 - **`orchestrator.ts`** (`PrismOrchestrator`) — pure sequencing logic
   with no AI or database calls of its own:
   - `getActivePhase()` — which phase the project is currently on
@@ -75,11 +76,12 @@ holds:
     statement, and every upstream phase's output
 
 **(planned)** The per-phase system instructions, prompts, and Zod output
-schemas for the 9 agents beyond the Problem Analyst, Stakeholder
-Analyst, Pain Analyst, Research Agent, Existing Solution Agent, and Gap
-Agent (see §2a/§2b/§2c/§2d) — this foundation establishes where they
-plug in (`AiProvider.generateStructured` via the phase registry), not
-their content.
+schemas for the 7 agents beyond the Problem Analyst, Stakeholder
+Analyst, Pain Analyst, Research Agent, Existing Solution Agent, Gap
+Agent, Opportunity Agent, and Innovation Agent (see
+§2a/§2b/§2c/§2d/§2e) — this foundation establishes where they plug in
+(`AiProvider.generateStructured` via the phase registry), not their
+content.
 
 ### 2a. Phase engine and Phase 01 — Problem Intelligence (reference implementation)
 
@@ -387,7 +389,120 @@ generic `ai` charge the phase engine already applies around one call.
 - **Registered** in `src/lib/phases/registry.ts` exactly like the prior
   phases — no new API routes, no route changes.
 
-Phases 05–10 extend this the same way: add an entry to the agent
+### 2e. Phase 05 — Opportunity & Innovation Intelligence
+
+Two agents, run in sequence within one composer call, the same
+"phase engine sees one `AiResult`" pattern as Phase 02. No new
+orchestration system, AI abstraction, or research provider — this
+phase reasons entirely over Phases 01–04's already-collected evidence
+(no Tavily calls of its own), and both agent calls are charged as the
+single generic `ai` unit the phase engine already applies per run
+(`combineUsage`, same as Phase 02).
+
+- **`src/lib/agents/opportunity-agent/`** — the first call. Given the
+  approved Problem, Stakeholder & Pain, Existing Solution, and Gap
+  analyses, it identifies which gaps represent a genuinely meaningful
+  opportunity — explicitly not "generate ideas," not "add AI
+  everywhere." Every draft opportunity is classified into exactly one
+  of `STRONG_OPPORTUNITY` / `PROMISING_OPPORTUNITY` /
+  `EXPLORATORY_OPPORTUNITY` / `INSUFFICIENT_EVIDENCE`, and an empty
+  `opportunities` list — "no meaningful opportunity here" — is a fully
+  valid, unpenalized result, the same discipline Phase 03 applies to
+  zero solutions and Phase 04 applies to zero gaps. Each opportunity
+  carries a `whyNow` block (technology readiness, market shift, policy
+  change, behavior change, infrastructure change, cost reduction, new
+  data availability, new regulations, new unmet demand — each
+  evidence-tagged, `VERIFIED` only when the upstream evidence actually
+  supports it) and an `impact` list that only includes dimensions
+  (user/community/industry/government/economic/environmental/social/
+  operational) genuinely relevant to that opportunity, never a padded
+  full set.
+- **`src/lib/agents/innovation-agent/`** — the second call, given the
+  first call's draft opportunities as an explicit parameter (the same
+  "second agent takes the first agent's output as a param, not through
+  `context`" pattern the Pain Analyst uses for the Stakeholder
+  Analyst's output). For every opportunity it produces exactly one
+  assessment: candidate innovation directions (from an 11-value
+  vocabulary — `SOFTWARE`, `HARDWARE`, `AI_ML`, `AUTOMATION`, `DATA`,
+  `WORKFLOW`, `SERVICE`, `INFRASTRUCTURE`, `POLICY_PROCESS`,
+  `MARKETPLACE`, `HYBRID` — only the categories that genuinely fit, an
+  empty list when none do), a differentiation claim, `innovationPotential`
+  / `feasibilityPotential` scores, a `refinedOpportunityState` (which
+  may confirm or downgrade the draft agent's first-pass guess once a
+  viable direction has actually been searched for), and per-opportunity
+  `validationQuestions` for anything still uncertain.
+  - **Mandatory anti-AI-hype rule**: every innovation direction carries
+    an `aiJustification` classified `AI_REQUIRED` / `AI_USEFUL` /
+    `AI_OPTIONAL` / `AI_NOT_JUSTIFIED`, with required reasoning. This
+    is enforced beyond the prompt: the composer rejects as
+    `invalid_output` any `AI_ML` direction whose own justification says
+    `AI_NOT_JUSTIFIED` — a direct contradiction that would otherwise
+    let the model quietly default to "add AI" regardless of its own
+    stated reasoning.
+  - **Differentiation, without overclaiming**: differentiation is a
+    `richEvidenceClaim` (see below), and the composer mechanically
+    rejects any claim containing "first," "only," "unique," or "world's
+    first" unless its `status` is `VERIFIED` — a hedged "potential" or
+    "identified" differentiation is required otherwise. This is a
+    pattern match on the model's own claim text, not just a prompt
+    instruction.
+  - **Opportunity landscape**: every opportunity — including weak ones
+    — gets a comparison row across stakeholder value, pain relevance,
+    gap strength, differentiation strength, innovation strength,
+    feasibility strength, impact strength, and confidence (all
+    qualitative `low`/`medium`/`high`). The composer rejects output that
+    omits any opportunity from this comparison ("do not hide weaker
+    opportunities"), then computes an ordinal `rank` deterministically
+    from those qualitative levels — continuing the "no fake numbers"
+    discipline: the model supplies honest qualitative judgments, the
+    rank number itself is never asked of or estimated by the model.
+  - **Opportunity reality check**: one dynamically-generated signal per
+    run — `STRONG` / `PROMISING` / `SPECULATIVE` /
+    `NO_CLEAR_OPPORTUNITY` / `INSUFFICIENT_EVIDENCE` — with an
+    explanation grounded in that run's actual findings, never
+    boilerplate.
+- **`richEvidenceClaimSchema`** (`src/lib/prism/evidence.ts`) — Phase
+  04's `gapEvidenceClaimSchema` (claim/status/`sourceIds`/confidence/
+  reasoning, `VERIFIED` requires ≥1 cited source) promoted to a shared
+  schema once Phase 05 needed the identical shape, rather than a third
+  phase defining its own copy. `gap-agent/schema.ts` now re-exports it
+  under its original name — zero breakage for Phase 04's own code or
+  tests.
+- **`src/lib/phases/opportunity-innovation/`** — the composer. Runs the
+  Opportunity Agent, validates every reference it cited (stakeholder,
+  pain, gap, source id) against what Phases 01–04 actually produced —
+  including rejecting an opportunity grounded in a gap whose state is
+  `NO_GAP_ESTABLISHED`, completing the opportunity chain (problem →
+  stakeholder → pain → existing solution → gap → unserved need →
+  opportunity → innovation direction) as a code-enforced invariant, not
+  a prompt request. Only then runs the Innovation Agent against the
+  resulting draft opportunities, checks its assessments are exactly
+  one-per-opportunity (no missing, no duplicates, no unknown ids), then
+  merges each draft opportunity with its assessment into the final
+  `opportunitySchema` — replacing the draft's first-pass
+  `opportunityState` with the Innovation Agent's `refinedOpportunityState`.
+  `overallFinding` (`MEANINGFUL_OPPORTUNITY_FOUND` /
+  `NO_MEANINGFUL_OPPORTUNITY`) is computed here, not asked of either
+  model: `NO_MEANINGFUL_OPPORTUNITY` when there are no opportunities at
+  all, or every one of them was refined down to
+  `INSUFFICIENT_EVIDENCE` — concluding "no real opportunity" is treated
+  as a legitimate, successful result, never a failure to route around.
+- **Opportunity vs. solution, kept separate**: Phase 05 may name
+  innovation *directions* (a category and its rationale), but never a
+  concrete product architecture — that remains Phase 08's job
+  (Solution Consultant), grounded in every prior phase rather than
+  invented up front.
+- **Dependency on Phase 01, 02, AND 04**: enforced entirely by the
+  existing, unmodified `PrismOrchestrator.canEnterPhase` — no
+  Phase-05-specific gating logic. As with Phase 04, `existing_solutions`
+  (Phase 03) only has to have run, not be explicitly approved, since it
+  has `requiresApproval: false` in the phase catalog.
+- **Persistence**: `analysis_phases.output_data` (jsonb), same pattern
+  as Phases 01–04. No new tables.
+- **Registered** in `src/lib/phases/registry.ts` exactly like the prior
+  phases — no new API routes, no route changes.
+
+Phases 06–10 extend this the same way: add an entry to the agent
 registry, and where a phase needs more than one agent, have that
 phase's `execute` internally call each and merge their output — the
 phase engine only ever sees one `AiResult`.
@@ -530,17 +645,18 @@ Per the scope of this foundation pass, the following are intentionally
   obtain one through the UI)
 - Any investigation UI (problem input form, phase review/approval
   screens, dossier view, stakeholder/pain relationship graph, existing-
-  solution comparison view, gap coverage matrix view) — Phases 01–04
-  exist as tested API + service layer only; see §2a/§2b/§2c/§2d. The
-  stakeholder/pain data model is built to support a future network-graph
-  view (`painPointIds` on each stakeholder), but no visual graph exists.
-- Phases 05–10's agents, schemas, and prompts (the registry and engine
-  they plug into are done — see §2a/§2b/§2c/§2d)
+  solution comparison view, gap coverage matrix view, opportunity
+  landscape/ranking view) — Phases 01–05 exist as tested API + service
+  layer only; see §2a/§2b/§2c/§2d/§2e. The stakeholder/pain data model
+  is built to support a future network-graph view (`painPointIds` on
+  each stakeholder), but no visual graph exists.
+- Phases 06–10's agents, schemas, and prompts (the registry and engine
+  they plug into are done — see §2a/§2b/§2c/§2d/§2e)
 - Populating the normalized `stakeholders` / `pain_points` /
   `research_sources` tables from Phase 02/03 output (currently
-  jsonb-only — see §2b/§2c). Phase 04 has no normalized-table
-  counterpart in the existing schema at all — its output lives in
-  `analysis_phases.output_data` only, by design (see §2d).
+  jsonb-only — see §2b/§2c). Phases 04 and 05 have no normalized-table
+  counterpart in the existing schema at all — their output lives in
+  `analysis_phases.output_data` only, by design (see §2d/§2e).
 - PDF upload handling for the `pdf_upload` input method (the schema and
   `source_file_url` column exist; nothing populates or reads a file yet)
 - The voice consultant and cinematic opening experience

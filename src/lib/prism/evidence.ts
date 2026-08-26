@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { qualitativeLevelSchema } from "./scoring";
+
 /**
  * Every factual claim PRISM surfaces must be labeled with one of these.
  * This is the mechanism that keeps the product honest instead of
@@ -41,3 +43,33 @@ export const evidenceClaimSchema = z.object({
 });
 
 export type EvidenceClaim = z.infer<typeof evidenceClaimSchema>;
+
+/**
+ * A richer evidence claim for phases that cite multiple, phase-local
+ * source ids (e.g. a Phase 03 `sourceLocalId` slug, not a DB UUID) and
+ * want their own per-claim confidence — first introduced for Phase 04's
+ * gap model, promoted here once Phase 05 needed the identical shape
+ * rather than a second phase defining its own copy. A `VERIFIED` claim
+ * with zero cited sources is rejected at the schema level; whether a
+ * cited id actually *exists* is the composer's job, since only it has
+ * the real source list to check against.
+ */
+export const richEvidenceClaimSchema = z
+  .object({
+    claim: z.string().min(1),
+    status: evidenceStatusSchema,
+    sourceIds: z.array(z.string().min(1)).default([]),
+    confidence: qualitativeLevelSchema,
+    reasoning: z.string().min(1),
+  })
+  .superRefine((claim, ctx) => {
+    if (claim.status === "VERIFIED" && claim.sourceIds.length === 0) {
+      ctx.addIssue({
+        code: "custom",
+        message: "A VERIFIED claim must cite at least one source id.",
+        path: ["sourceIds"],
+      });
+    }
+  });
+
+export type RichEvidenceClaim = z.infer<typeof richEvidenceClaimSchema>;

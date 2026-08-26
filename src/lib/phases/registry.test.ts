@@ -9,6 +9,7 @@ const IMPLEMENTED: PrismPhaseKey[] = [
   "stakeholder_pain",
   "existing_solutions",
   "gap_intelligence",
+  "opportunity_innovation",
 ];
 
 describe("getPhaseExecutor", () => {

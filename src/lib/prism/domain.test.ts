@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { decisionRecommendationSchema, finalDecisionSchema } from "./decision";
-import { evidenceClaimSchema, evidenceStatusSchema } from "./evidence";
+import { evidenceClaimSchema, evidenceStatusSchema, richEvidenceClaimSchema } from "./evidence";
 import { MODE_CRITERIA, projectModeSchema } from "./modes";
 import { scoreSchema } from "./scoring";
 
@@ -31,6 +31,40 @@ describe("evidenceClaimSchema", () => {
       reasoning: "",
     });
     expect(result.success).toBe(false);
+  });
+});
+
+describe("richEvidenceClaimSchema", () => {
+  const base = { claim: "x", reasoning: "y", confidence: "medium" as const };
+
+  it("rejects a VERIFIED claim with no cited sources", () => {
+    const result = richEvidenceClaimSchema.safeParse({
+      ...base,
+      status: "VERIFIED",
+      sourceIds: [],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts a VERIFIED claim that cites a source", () => {
+    const result = richEvidenceClaimSchema.safeParse({
+      ...base,
+      status: "VERIFIED",
+      sourceIds: ["source-1"],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("allows ASSUMPTION/UNKNOWN with no sources", () => {
+    expect(
+      richEvidenceClaimSchema.safeParse({ ...base, status: "ASSUMPTION", sourceIds: [] })
+        .success,
+    ).toBe(true);
+  });
+
+  it("defaults sourceIds to an empty array", () => {
+    const result = richEvidenceClaimSchema.parse({ ...base, status: "INFERENCE" });
+    expect(result.sourceIds).toEqual([]);
   });
 });
 
