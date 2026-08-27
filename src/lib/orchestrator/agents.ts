@@ -131,7 +131,8 @@ export const AGENTS: readonly AgentDefinition[] = [
     id: "validation_agent",
     name: "Validation Agent",
     phase: "poc_validation",
-    responsibility: "Defines POC plan and validation criteria.",
+    responsibility:
+      "Adversarially validates the recommended solution — red-team critique, a simulated jury challenge, and a real-world validation plan — before deriving BUILD / PROCEED_WITH_CHANGES / VALIDATE_BEFORE_BUILD / DO_NOT_BUILD.",
     usesResearch: false,
   },
   {

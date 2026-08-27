@@ -13,6 +13,7 @@ const IMPLEMENTED: PrismPhaseKey[] = [
   "market_investment",
   "technical_feasibility",
   "solution_consultant",
+  "poc_validation",
 ];
 
 describe("getPhaseExecutor", () => {

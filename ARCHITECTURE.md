@@ -60,9 +60,9 @@ holds:
   Agent, Existing Solution Agent, Gap Agent, Opportunity Agent,
   Innovation Agent, Market Agent, Investment Agent, Feasibility Agent,
   Solution Consultant, Validation Agent, Jury Agent, Report Generator),
-  each mapped to the phase it belongs to. The first twelve of these are
-  implemented (see §2a/§2b/§2c/§2d/§2e/§2f/§2g/§2h). Phase 06's Market
-  Agent internally depends on a Market Research Agent component
+  each mapped to the phase it belongs to. The first thirteen of these
+  are implemented (see §2a/§2b/§2c/§2d/§2e/§2f/§2g/§2h/§2i). Phase 06's
+  Market Agent internally depends on a Market Research Agent component
   (`src/lib/agents/market-research-agent/`) the same way Phase 03's
   named Research Agent internally splits into a question-generator and
   an executor — an implementation detail under the one named
@@ -81,13 +81,13 @@ holds:
     statement, and every upstream phase's output
 
 **(planned)** The per-phase system instructions, prompts, and Zod output
-schemas for the 3 agents beyond the Problem Analyst, Stakeholder
+schemas for the 2 agents beyond the Problem Analyst, Stakeholder
 Analyst, Pain Analyst, Research Agent, Existing Solution Agent, Gap
 Agent, Opportunity Agent, Innovation Agent, Market Agent, Investment
-Agent, Feasibility Agent, and Solution Consultant (see
-§2a/§2b/§2c/§2d/§2e/§2f/§2g/§2h) — this foundation establishes where
-they plug in (`AiProvider.generateStructured` via the phase registry),
-not their content.
+Agent, Feasibility Agent, Solution Consultant, and Validation Agent
+(see §2a/§2b/§2c/§2d/§2e/§2f/§2g/§2h/§2i) — this foundation establishes
+where they plug in (`AiProvider.generateStructured` via the phase
+registry), not their content.
 
 ### 2a. Phase engine and Phase 01 — Problem Intelligence (reference implementation)
 
@@ -825,10 +825,128 @@ it.
 - **Registered** in `src/lib/phases/registry.ts` exactly like the prior
   phases — no new API routes, no route changes.
 
-Phases 09–10 extend this the same way: add an entry to the agent
-registry, and where a phase needs more than one agent, have that
-phase's `execute` internally call each and merge their output — the
-phase engine only ever sees one `AiResult`.
+### 2i. Phase 09 — Validation, Adversarial Review & Jury Challenge
+
+A single agent, like Phase 01, 04, 07, and 08 — the phase catalog's own
+`agents: ["validation_agent"]` roster entry — no new Tavily research of
+its own. Phase 08 recommended a solution; Phase 09's only job is to try
+to break that recommendation. It does not ask the model "is this a good
+solution?" — it constructs an adversarial evaluation from Phases 01–08's
+own evidence and challenges the claims, assumptions, dependencies,
+architecture, market, feasibility, differentiation, user value, and
+implementation, one at a time.
+
+- **No new research, reasons over the full chain**: exactly Phase 07/08's
+  precedent — Phase 09 re-validates and reasons entirely over Phases
+  01–08's already-collected evidence, the widest input surface of any
+  phase so far (all eight prior phases, not just the most recent few).
+- **`src/lib/agents/validation-agent/`**:
+  - **No fake validation**: `validationClaimSchema.evidenceStatus` is a
+    six-way vocabulary — `VERIFIED` / `PARTIALLY_SUPPORTED` (evidence-
+    validated, and only either status may cite zero sources: the schema
+    itself rejects a `VERIFIED` or `PARTIALLY_SUPPORTED` claim with no
+    `sourceIds`), `INFERENCE` / `ASSUMPTION` (a model assessment, not a
+    fact), and `UNKNOWN` / `CONTRADICTED` (unvalidated) — deliberately
+    wider than the shared `evidenceStatusSchema`, since a validation
+    claim is actively testing a prior claim rather than making one.
+  - **Assumption register**: every assumption the project depends on,
+    each with a category (twelve-way: USER/MARKET/TECHNICAL/DATA/
+    BUSINESS/OPERATIONAL/REGULATORY/TEAM/TIME/COST/ADOPTION/OTHER), a
+    validation method, a failure impact, and an honest status
+    (SUPPORTED/PARTIALLY_SUPPORTED/UNSUPPORTED/UNKNOWN/CONTRADICTED) —
+    the single source of truth every other section (critical assumption,
+    red team's "most fragile assumption") must reference by real id,
+    never invent a second one.
+  - **Red team**: actively argues *against* the solution, and every
+    point is tagged `EVIDENCE_BACKED` (must cite a real source) or
+    `HYPOTHETICAL` (a genuine "what if", never disguised as fact) — the
+    same discipline `richEvidenceClaimSchema` applies to `VERIFIED`,
+    reused here at the red-team-point level.
+  - **Jury**: a fixed, always-fully-present five-key object
+    (TECHNICAL_JUDGE/DOMAIN_EXPERT/BUSINESS_JUDGE/IMPACT_JUDGE/
+    PRODUCT_JUDGE — the same non-sparse discipline as Phase 07/08's
+    checklist-shaped fields), each with a `scoreOrAssessment` that
+    reuses the shared `Score` model so "never a bare score" is enforced
+    by the type itself. Jury questions are dynamically generated per
+    project, each with an honest `answerStatus`
+    (STRONG/DEFENSIBLE/WEAK/UNKNOWN) — `UNKNOWN` is a legitimate,
+    expected answer, not a failure to manufacture around.
+  - **Failure modes and pre-mortem**: every failure mode's
+    `likelihood`/`severity` is qualitative with `basis: "ai_estimate"` —
+    exactly the "MODEL_ESTIMATE, never a fabricated statistic"
+    instruction, reusing `scoreBasisSchema` rather than a new vocabulary
+    (the same choice Phase 07's risk register made). The pre-mortem
+    assumes the project already failed and works backward to plausible
+    causes, each with an early warning signal and a preventive action.
+  - **Counter-solution analysis**: compares the recommended solution
+    against a simpler solution, the best existing solution, and a
+    manual workaround, and its `conclusion` enum genuinely allows
+    `SIMPLER_SOLUTION_PREFERRED` or `EXISTING_SOLUTION_SUFFICIENT` —
+    the validator is not biased toward justifying Phase 08's pick, which
+    is the whole point: this is PRISM's guard against overengineering.
+  - **`buildRecommendation`** (BUILD/BUILD_WITH_CHANGES/
+    VALIDATE_BEFORE_BUILD/DO_NOT_BUILD) is the agent's own honest
+    qualitative call — distinct from, and never authoritative over, the
+    composer's deterministic `finalValidationDecision` below.
+- **`src/lib/phases/poc-validation/`** — the composer enforces what Zod
+  alone can't check, and then runs a decision engine the model cannot
+  override:
+  - **Assumption cross-references**: `criticalAssumption.assumptionId`
+    and (when set) `redTeamReview.mostFragileAssumptionId` must resolve
+    to a real entry in the agent's own `assumptionRegister` — never a
+    newly invented "most dangerous" assumption.
+  - **Coherence with Phase 08**: if Phase 08 recommended no solution,
+    `buildRecommendation` must be `DO_NOT_BUILD`; `pocValidation.status`
+    must be `NO_POC_DEFINED` if and only if Phase 08's own `pocDefinition`
+    is actually `null`; an empty Phase 08 `successMetrics` list can
+    never be reviewed as well-defined, measurable, relevant, or
+    realistic.
+  - **Confidence honesty**: `overallConfidence` cannot be `HIGH` while
+    any validation claim is `CONTRADICTED` or the critical assumption
+    itself is `UNSUPPORTED`/`CONTRADICTED` — PRISM cannot claim high
+    confidence in a project it just found a hole in.
+  - **Source citations**: every `sourceIds` reference resolves against
+    Phase 06's combined evidence list, exactly as Phase 07/08 enforce.
+  - **Decision engine** (`finalValidationDecision`: VALIDATED_TO_PROCEED/
+    PROCEED_WITH_CHANGES/VALIDATE_BEFORE_BUILD/DO_NOT_BUILD/
+    INSUFFICIENT_EVIDENCE) is computed here, never taken from the
+    model's `buildRecommendation` unmodified:
+    1. No Phase 08 solution → `DO_NOT_BUILD` if Phase 08's own reality
+       check was `NOT_RECOMMENDED`, otherwise `INSUFFICIENT_EVIDENCE`.
+    2. Phase 07 overall feasibility `INFEASIBLE` → `DO_NOT_BUILD`.
+    3. Evidence `CONTRADICTED` on the core problem or its pain →
+       `DO_NOT_BUILD`.
+    4. Otherwise, a numeric floor (0=VALIDATED_TO_PROCEED best,
+       3=DO_NOT_BUILD worst) is raised by: an unsupported/contradicted
+       critical assumption (floor ≥ VALIDATE_BEFORE_BUILD), any
+       unresolved Phase 07 critical blocker (floor ≥
+       PROCEED_WITH_CHANGES — can never be VALIDATED_TO_PROCEED), and a
+       feasible-but-not-HIGH-confidence combination (floor raised further
+       the weaker the confidence). The final decision is the *worse* of
+       this floor and the agent's own `buildRecommendation` — the model
+       can independently propose something more pessimistic than the
+       floor requires (PRISM must be comfortable concluding "this is a
+       bad idea"), but it can never propose something better than the
+       floor allows.
+  `evidenceSummary`'s numeric counts (including a new
+  `contradictedClaimsCount`) are computed here from the validation
+  claims themselves, continuing the same agent-narrative/composer-number
+  split as every prior phase.
+- **Dependency on Phase 01, 02, 04, 05, 07, AND 08**: enforced entirely
+  by the existing, unmodified `PrismOrchestrator.canEnterPhase` — no
+  Phase-09-specific gating logic. As with Phase 07/08, both
+  `existing_solutions` (Phase 03) and `market_investment` (Phase 06)
+  only have to have run, not be explicitly approved.
+- **Persistence**: `analysis_phases.output_data` (jsonb), same pattern
+  as Phases 01–08. No new tables.
+- **Registered** in `src/lib/phases/registry.ts` exactly like the prior
+  phases — no new API routes, no route changes.
+
+Phase 10 extends this the same way: add an entry to the agent registry,
+and where a phase needs more than one agent (Phase 10 itself calls both
+the Jury Agent and the Report Generator), have that phase's `execute`
+internally call each and merge their output — the phase engine only
+ever sees one `AiResult`.
 
 ## 3. AI provider abstraction
 
@@ -974,20 +1092,21 @@ Per the scope of this foundation pass, the following are intentionally
   solution comparison view, gap coverage matrix view, opportunity
   landscape/ranking view, market/TAM-SAM-SOM/investment view,
   feasibility/risk-register/roadmap view, solution architecture/data-flow
-  diagram view) — Phases 01–08 exist as tested API + service layer only;
-  see §2a/§2b/§2c/§2d/§2e/§2f/§2g/§2h. The stakeholder/pain data model is
+  diagram view, validation/red-team/jury-review view) — Phases 01–09
+  exist as tested API + service layer only; see
+  §2a/§2b/§2c/§2d/§2e/§2f/§2g/§2h/§2i. The stakeholder/pain data model is
   built to support a future network-graph view (`painPointIds` on each
   stakeholder), but no visual graph exists. Phase 08's `architecture` and
   `dataFlow` fields are likewise structured data waiting on a future
   diagram renderer, not an image.
-- Phases 09–10's agents, schemas, and prompts (the registry and engine
-  they plug into are done — see §2a/§2b/§2c/§2d/§2e/§2f/§2g/§2h)
+- Phase 10's agents, schemas, and prompts (the registry and engine they
+  plug into are done — see §2a/§2b/§2c/§2d/§2e/§2f/§2g/§2h/§2i)
 - Populating the normalized `stakeholders` / `pain_points` /
   `research_sources` tables from Phase 02/03 output (currently
-  jsonb-only — see §2b/§2c). Phases 04, 05, 06, 07, and 08 have no
+  jsonb-only — see §2b/§2c). Phases 04, 05, 06, 07, 08, and 09 have no
   normalized-table counterpart in the existing schema at all — their
   output lives in `analysis_phases.output_data` only, by design (see
-  §2d/§2e/§2f/§2g/§2h).
+  §2d/§2e/§2f/§2g/§2h/§2i).
 - PDF upload handling for the `pdf_upload` input method (the schema and
   `source_file_url` column exist; nothing populates or reads a file yet)
 - The voice consultant and cinematic opening experience

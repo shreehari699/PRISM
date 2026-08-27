@@ -23,6 +23,10 @@ import {
   opportunityInnovationAnalysisSchema,
 } from "@/lib/phases/opportunity-innovation";
 import {
+  runPocValidationPhase,
+  pocValidationAnalysisSchema,
+} from "@/lib/phases/poc-validation";
+import {
   runSolutionConsultantPhase,
   solutionConsultantAnalysisSchema,
 } from "@/lib/phases/solution-consultant";
@@ -86,6 +90,10 @@ const registry: Partial<Record<PrismPhaseKey, PhaseExecutor>> = {
   solution_consultant: {
     schema: solutionConsultantAnalysisSchema,
     execute: (context, provider) => runSolutionConsultantPhase(context, provider),
+  },
+  poc_validation: {
+    schema: pocValidationAnalysisSchema,
+    execute: (context, provider) => runPocValidationPhase(context, provider),
   },
 };
 
