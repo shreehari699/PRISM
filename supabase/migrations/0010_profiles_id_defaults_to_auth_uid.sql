@@ -1,0 +1,35 @@
+-- Closes the exact gap that produced a real, reproducible failure:
+--
+--   Failed to provision user profile: new row violates row-level security
+--   policy for table "profiles" — code: 42501
+--
+-- profiles_insert_own (0009) checks `id = auth.uid()`, and the application
+-- computed `id` itself from `auth.getUser()` and sent it explicitly in the
+-- insert. Those two values are *supposed* to always agree — they come from
+-- the same signed-in session — but nothing in that design forces them to be
+-- evaluated in the same breath: `auth.getUser()` is a call to the Auth
+-- server that can itself trigger a token refresh, and the follow-up insert
+-- is a separate PostgREST request. If the access token used for that
+-- second request is fractionally behind the one `getUser()` just validated
+-- (a session mid-refresh is the realistic case, not a bug in either call
+-- individually), the client-computed `id` and the `auth.uid()` RLS checks
+-- against can disagree for that one request, and `profiles_insert_own`
+-- correctly rejects it — RLS did its job, the input was just wrong.
+--
+-- The fix is to stop supplying `id` from the client for this table at all.
+-- Giving it `default auth.uid()` means Postgres fills it in from the exact
+-- same auth context RLS evaluates, in the exact same statement — there is
+-- no longer a second, independently-computed value that could ever
+-- disagree. This tightens the invariant, it doesn't loosen it: a client
+-- can no longer even attempt to write a different id than its own
+-- session's auth.uid(), regardless of timing. An unauthenticated request
+-- (auth.uid() is null) now fails on profiles.id's own not-null constraint
+-- instead of silently succeeding with a null id — a safe, honest failure
+-- either way.
+--
+-- Idempotent: re-running `alter column ... set default` is a no-op if the
+-- default is already set. No table dropped, no column removed, no
+-- foreign key touched, no other table modified, RLS untouched and still
+-- fully enforced.
+
+alter table public.profiles alter column id set default auth.uid();

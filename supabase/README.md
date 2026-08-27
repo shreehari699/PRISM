@@ -30,6 +30,7 @@ npx supabase db push
 | `0007_row_level_security.sql` | RLS policies for every table above |
 | `0008_usage_functions.sql` | `increment_usage()` — atomic, service-role-only usage counter |
 | `0009_profiles_insert_policy_and_backfill.sql` | Missing `profiles` INSERT policy (matches SECURITY.md's documented model) + one-time backfill for any `auth.users` row that predates the auto-provisioning trigger |
+| `0010_profiles_id_defaults_to_auth_uid.sql` | `profiles.id` now defaults to `auth.uid()`, so a client-provisioned profile insert can never disagree with the `profiles_insert_own` RLS check that validates it |
 
 See `SECURITY.md` at the repo root for the RLS design rationale.
 

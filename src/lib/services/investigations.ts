@@ -84,6 +84,18 @@ function describeDbError(
  * there yet, or the table shape differs). The follow-up `select` is what
  * turns that into an honest, specific failure here instead of a confusing
  * foreign-key violation two inserts later.
+ *
+ * Deliberately omits `id` from the insert payload rather than sending
+ * `userId` — `profiles.id` defaults to `auth.uid()`
+ * (0010_profiles_id_defaults_to_auth_uid.sql), so Postgres fills it in
+ * from the exact same auth context `profiles_insert_own`'s
+ * `with check (id = auth.uid())` evaluates, in the same statement. A
+ * client-computed id sent alongside `auth.getUser()`'s own read of the
+ * session can disagree with `auth.uid()` for a single request if the
+ * session happens to be mid-refresh — the real 42501 this function was
+ * hardened against — even though both individually reflect "this session,
+ * correctly." Not supplying `id` at all removes that class of mismatch
+ * entirely rather than requiring the two to agree after the fact.
  */
 async function ensureOwnProfile(
   supabase: DbClient,
@@ -93,10 +105,7 @@ async function ensureOwnProfile(
 ): Promise<ServiceResult<true>> {
   const { error: upsertError } = await supabase
     .from("profiles")
-    .upsert(
-      { id: userId, email, full_name: fullName },
-      { onConflict: "id", ignoreDuplicates: true },
-    );
+    .upsert({ email, full_name: fullName }, { onConflict: "id", ignoreDuplicates: true });
 
   if (upsertError) {
     return fail("error", `Failed to provision user profile: ${describeDbError(upsertError)}`);
