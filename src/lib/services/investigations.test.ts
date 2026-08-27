@@ -54,9 +54,9 @@ describe("createInvestigationInputSchema", () => {
 const testUser = { email: "farmer-app@example.com", fullName: "Asha Rao" };
 
 describe("createInvestigation", () => {
-  it("ensures the caller's own profile exists, then creates a project, problem statement, and session in sequence", async () => {
+  it("provisions a missing profile, verifies it, then creates a project, problem statement, and session in sequence", async () => {
     const db = createMockDb({
-      profiles: [noRow],
+      profiles: [noRow, row({ id: "user-1" })],
       projects: [
         row({
           id: "project-1",
@@ -105,7 +105,50 @@ describe("createInvestigation", () => {
     }
   });
 
-  it("returns a typed error if profile provisioning fails, without touching projects at all", async () => {
+  it("succeeds the same way for a user whose profile already existed (upsert no-ops, verify finds it)", async () => {
+    const db = createMockDb({
+      profiles: [noRow, row({ id: "user-1" })],
+      projects: [
+        row({
+          id: "project-1",
+          user_id: "user-1",
+          name: validInput.name,
+          mode: validInput.mode,
+          status: "active",
+          created_at: now,
+          updated_at: now,
+        }),
+      ],
+      problem_statements: [
+        row({
+          id: "ps-1",
+          project_id: "project-1",
+          raw_text: validInput.rawText,
+          input_method: validInput.inputMethod,
+          source_file_url: null,
+          discovery_parameters: null,
+          created_at: now,
+          updated_at: now,
+        }),
+      ],
+      analysis_sessions: [
+        row({
+          id: "session-1",
+          project_id: "project-1",
+          problem_statement_id: "ps-1",
+          current_phase_key: "problem_intelligence",
+          status: "in_progress",
+          created_at: now,
+          updated_at: now,
+        }),
+      ],
+    });
+
+    const result = await createInvestigation(db, "user-1", validInput, testUser);
+    expect(result.ok).toBe(true);
+  });
+
+  it("returns a typed error if the profile upsert itself fails, without touching projects at all", async () => {
     const db = createMockDb({
       profiles: [dbError("new row violates row-level security policy")],
     });
@@ -119,9 +162,30 @@ describe("createInvestigation", () => {
     }
   });
 
+  it("returns a specific, actionable error — never a downstream FK violation — when the upsert reports success but the profile still can't be found", async () => {
+    // This is exactly the shape of the real production bug this test suite
+    // was written against: the profile step reports no error, yet the
+    // profile genuinely isn't visible to this session (e.g. the running
+    // app is pointed at a different Supabase project than the one
+    // migrations were applied to). It must be caught here, not surface
+    // three inserts later as an opaque foreign-key violation.
+    const db = createMockDb({
+      profiles: [noRow, noRow],
+    });
+
+    const result = await createInvestigation(db, "user-1", validInput, testUser);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("error");
+      expect(result.message).toMatch(/no profiles row exists/);
+      expect(result.message).toMatch(/NEXT_PUBLIC_SUPABASE_URL/);
+    }
+  });
+
   it("returns a typed error if project creation fails, without touching later tables", async () => {
     const db = createMockDb({
-      profiles: [noRow],
+      profiles: [noRow, row({ id: "user-1" })],
       projects: [dbError("permission denied")],
     });
 
@@ -136,7 +200,7 @@ describe("createInvestigation", () => {
 
   it("returns a typed error if the problem statement insert fails", async () => {
     const db = createMockDb({
-      profiles: [noRow],
+      profiles: [noRow, row({ id: "user-1" })],
       projects: [
         row({
           id: "project-1",

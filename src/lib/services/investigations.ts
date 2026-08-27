@@ -42,19 +42,48 @@ export interface CreatedInvestigation {
 }
 
 /**
+ * Formats a Postgrest/Postgres error with every field it actually carries,
+ * not just `.message` — `code`/`details`/`hint` are frequently where the
+ * real, actionable reason lives (e.g. `hint` names the exact missing
+ * grant; `code` is the stable Postgres/PostgREST error code). None of
+ * these fields can ever contain a secret — they describe *schema and
+ * constraint* state, not data — so surfacing them in a returned error
+ * message is safe.
+ */
+function describeDbError(
+  error: { message: string; code?: string; details?: string | null; hint?: string | null } | null,
+): string {
+  if (!error) return "unknown error";
+  const parts = [error.message];
+  if (error.code) parts.push(`code: ${error.code}`);
+  if (error.details) parts.push(`details: ${error.details}`);
+  if (error.hint) parts.push(`hint: ${error.hint}`);
+  return parts.join(" — ");
+}
+
+/**
  * Ensures the authenticated caller has a `profiles` row before anything
  * that foreign-keys to it (`projects.user_id references profiles (id)`)
  * gets written. Normally unnecessary — `handle_new_user()`
  * (0002_profiles.sql) auto-provisions this on every new `auth.users`
  * insert — but that trigger cannot retroactively backfill an account that
  * existed before it did (e.g. a user who signed up while testing, before
- * migrations were applied to this project). `ignoreDuplicates` makes this
- * a no-op for the overwhelming common case where the profile already
- * exists; it never overwrites an existing row's `full_name`/`organization`.
- * Runs on the caller's own user-scoped client — `profiles_insert_own`
- * (0009_profiles_insert_policy_and_backfill.sql) is what actually allows
- * this, scoped to `id = auth.uid()`, so this can only ever create the
- * caller's own profile, never anyone else's.
+ * migrations were applied to this project). `ignoreDuplicates` makes the
+ * upsert step a no-op for the overwhelming common case where the profile
+ * already exists; it never overwrites an existing row's
+ * `full_name`/`organization`. Runs on the caller's own user-scoped
+ * client — `profiles_insert_own` (0009_profiles_insert_policy_and_backfill.sql)
+ * is what actually allows this, scoped to `id = auth.uid()`, so this can
+ * only ever create the caller's own profile, never anyone else's.
+ *
+ * Deliberately does not stop at "the upsert call didn't return an error" —
+ * an upsert with `ignoreDuplicates` can report success without the row
+ * actually being the one this caller expects if, for instance, the
+ * running application is pointed at a different Supabase project than the
+ * one migrations were applied to (so `profiles_insert_own` doesn't exist
+ * there yet, or the table shape differs). The follow-up `select` is what
+ * turns that into an honest, specific failure here instead of a confusing
+ * foreign-key violation two inserts later.
  */
 async function ensureOwnProfile(
   supabase: DbClient,
@@ -62,16 +91,40 @@ async function ensureOwnProfile(
   email: string,
   fullName: string | null,
 ): Promise<ServiceResult<true>> {
-  const { error } = await supabase
+  const { error: upsertError } = await supabase
     .from("profiles")
     .upsert(
       { id: userId, email, full_name: fullName },
       { onConflict: "id", ignoreDuplicates: true },
     );
 
-  if (error) {
-    return fail("error", `Failed to provision user profile: ${error.message}`);
+  if (upsertError) {
+    return fail("error", `Failed to provision user profile: ${describeDbError(upsertError)}`);
   }
+
+  const { data: verifyRow, error: verifyError } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (verifyError) {
+    return fail(
+      "error",
+      `Failed to verify user profile after provisioning: ${describeDbError(verifyError)}`,
+    );
+  }
+
+  if (!verifyRow) {
+    return fail(
+      "error",
+      "Profile provisioning reported no error, but no profiles row exists for this signed-in " +
+        "user. This most often means the running application's Supabase project " +
+        "(NEXT_PUBLIC_SUPABASE_URL) is not the same project the database migrations were " +
+        "applied to — double-check both point at the same project ref.",
+    );
+  }
+
   return ok(true as const);
 }
 
@@ -100,7 +153,7 @@ export async function createInvestigation(
     .maybeSingle();
 
   if (projectError || !projectRow) {
-    return fail("error", `Failed to create project: ${projectError?.message}`);
+    return fail("error", `Failed to create project: ${describeDbError(projectError)}`);
   }
   const project = projectRowSchema.parse(projectRow);
 
@@ -119,7 +172,7 @@ export async function createInvestigation(
   if (problemStatementError || !problemStatementRow) {
     return fail(
       "error",
-      `Failed to create problem statement: ${problemStatementError?.message}`,
+      `Failed to create problem statement: ${describeDbError(problemStatementError)}`,
     );
   }
   const problemStatement = problemStatementRowSchema.parse(problemStatementRow);
@@ -138,7 +191,7 @@ export async function createInvestigation(
   if (sessionError || !sessionRow) {
     return fail(
       "error",
-      `Failed to start analysis session: ${sessionError?.message}`,
+      `Failed to start analysis session: ${describeDbError(sessionError)}`,
     );
   }
   const session = analysisSessionRowSchema.parse(sessionRow);
