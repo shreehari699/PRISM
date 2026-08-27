@@ -29,7 +29,7 @@ build if pulled into client code.
 |---|---|---|
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes | Bypasses Row Level Security entirely. Supabase dashboard → Project Settings → API → `service_role` secret. Used only in `src/lib/supabase/admin.ts`, and only after application code independently verifies the caller owns the resource being written. |
 | `GEMINI_API_KEY` | Yes | Google AI Studio API key for Gemini. |
-| `GEMINI_MODEL` | No (default `gemini-2.5-flash`) | The Gemini model id to use. Never hard-coded elsewhere in the app — change this if a model is deprecated or a better one becomes available. If the configured model is unavailable, `src/lib/ai/gemini-provider.ts` returns an explicit `unavailable` result instead of crashing. |
+| `GEMINI_MODEL` | No (default `gemini-3.6-flash`) | The Gemini model id to use. Never hard-coded elsewhere in the app — change this if a model is deprecated or a better one becomes available. If the configured model is unavailable, `src/lib/ai/gemini-provider.ts` returns an explicit `unavailable` result instead of crashing. |
 | `RESEARCH_PROVIDER` | No (default `none`) | One of `none`, `tavily`, `serpapi`, `bing`. `none` makes the research layer honestly report "unavailable" instead of fabricating sources. Only `tavily` is implemented today — `serpapi`/`bing` throw a clear "not implemented" error rather than silently degrading. |
 | `TAVILY_API_KEY` | Only if `RESEARCH_PROVIDER=tavily` | [tavily.com](https://tavily.com) has a free tier suitable for initial deployment. |
 | `SERPAPI_API_KEY` | Not yet used | Reserved for when the SerpApi provider is implemented. |

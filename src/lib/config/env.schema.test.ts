@@ -35,7 +35,7 @@ describe("serverEnvSchema", () => {
 
   it("applies defaults for optional fields", () => {
     const result = serverEnvSchema.parse(base);
-    expect(result.GEMINI_MODEL).toBe("gemini-2.5-flash");
+    expect(result.GEMINI_MODEL).toBe("gemini-3.6-flash");
     expect(result.RESEARCH_PROVIDER).toBe("none");
     expect(result.USAGE_DAILY_AI_REQUEST_LIMIT).toBe(50);
   });

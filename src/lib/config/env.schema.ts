@@ -43,7 +43,7 @@ export const serverEnvSchema = z.object({
   GEMINI_MODEL: z
     .string()
     .min(1)
-    .default("gemini-2.5-flash"),
+    .default("gemini-3.6-flash"),
 
   // Optional research providers — the research layer must degrade to a
   // real "unavailable" state, never fabricate results, if these are unset.

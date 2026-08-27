@@ -31,7 +31,7 @@ describe("GeminiProvider.generateStructured", () => {
       },
     });
 
-    const provider = new GeminiProvider("test-key", "gemini-2.5-flash");
+    const provider = new GeminiProvider("test-key", "gemini-3.6-flash");
     const result = await provider.generateStructured({
       systemInstruction: "You are the Problem Analyst.",
       prompt: "Analyze this problem.",
@@ -48,7 +48,7 @@ describe("GeminiProvider.generateStructured", () => {
   it("returns invalid_output when the model response is not JSON", async () => {
     generateContentMock.mockResolvedValue({ text: "not json at all" });
 
-    const provider = new GeminiProvider("test-key", "gemini-2.5-flash");
+    const provider = new GeminiProvider("test-key", "gemini-3.6-flash");
     const result = await provider.generateStructured({
       systemInstruction: "sys",
       prompt: "prompt",
@@ -63,7 +63,7 @@ describe("GeminiProvider.generateStructured", () => {
       text: JSON.stringify({ problemSummary: "ok", severity: "way too high" }),
     });
 
-    const provider = new GeminiProvider("test-key", "gemini-2.5-flash");
+    const provider = new GeminiProvider("test-key", "gemini-3.6-flash");
     const result = await provider.generateStructured({
       systemInstruction: "sys",
       prompt: "prompt",
@@ -91,7 +91,7 @@ describe("GeminiProvider.generateStructured", () => {
   it("returns error for other failures instead of throwing", async () => {
     generateContentMock.mockRejectedValue(new Error("quota exceeded"));
 
-    const provider = new GeminiProvider("test-key", "gemini-2.5-flash");
+    const provider = new GeminiProvider("test-key", "gemini-3.6-flash");
     const result = await provider.generateStructured({
       systemInstruction: "sys",
       prompt: "prompt",
@@ -107,7 +107,7 @@ describe("GeminiProvider.generateStructured", () => {
       promptFeedback: { blockReason: "SAFETY" },
     });
 
-    const provider = new GeminiProvider("test-key", "gemini-2.5-flash");
+    const provider = new GeminiProvider("test-key", "gemini-3.6-flash");
     const result = await provider.generateStructured({
       systemInstruction: "sys",
       prompt: "prompt",
