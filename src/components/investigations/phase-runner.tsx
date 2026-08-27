@@ -2,8 +2,8 @@
 
 import { AlertCircle, Check, Lock, RotateCcw, Sparkles } from "lucide-react";
 
-import { GenericPhaseOutput } from "@/components/investigations/generic-phase-output";
 import { InvestigatingIndicator } from "@/components/investigations/investigating-indicator";
+import { PhaseOutput } from "@/components/investigations/phase-output";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -110,7 +110,7 @@ export function PhaseRunner({
           </div>
 
           <div className="rounded-lg border border-border p-5">
-            <GenericPhaseOutput value={dto.outputData} />
+            <PhaseOutput phaseKey={phase.key} value={dto.outputData} />
           </div>
         </div>
       ) : null}
