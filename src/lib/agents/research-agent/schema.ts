@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import type { AiUsage } from "@/lib/ai";
-import { researchSourceSchema } from "@/lib/research";
+import { researchSourceSchema } from "@/lib/research/types";
 
 /**
  * What kind of existing-solution landscape a query is meant to surface.

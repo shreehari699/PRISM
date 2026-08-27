@@ -22,7 +22,7 @@ import {
 } from "@/lib/agents/investment-agent/schema";
 import { confidenceLevelSchema } from "@/lib/prism/confidence";
 import { marketNumberSchema } from "@/lib/prism/market";
-import { researchSourceTypeSchema } from "@/lib/research";
+import { researchSourceTypeSchema } from "@/lib/research/types";
 
 /**
  * One evidence source backing this phase's market claims — either
