@@ -23,6 +23,10 @@ import {
   opportunityInnovationAnalysisSchema,
 } from "@/lib/phases/opportunity-innovation";
 import {
+  runSolutionConsultantPhase,
+  solutionConsultantAnalysisSchema,
+} from "@/lib/phases/solution-consultant";
+import {
   runTechnicalFeasibilityPhase,
   technicalFeasibilityAnalysisSchema,
 } from "@/lib/phases/technical-feasibility";
@@ -78,6 +82,10 @@ const registry: Partial<Record<PrismPhaseKey, PhaseExecutor>> = {
   technical_feasibility: {
     schema: technicalFeasibilityAnalysisSchema,
     execute: (context, provider) => runTechnicalFeasibilityPhase(context, provider),
+  },
+  solution_consultant: {
+    schema: solutionConsultantAnalysisSchema,
+    execute: (context, provider) => runSolutionConsultantPhase(context, provider),
   },
 };
 

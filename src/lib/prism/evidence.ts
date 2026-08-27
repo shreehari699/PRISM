@@ -101,3 +101,24 @@ export function collectCitedSourceIds(value: unknown, into: Set<string>): void {
     }
   }
 }
+
+/**
+ * Counts every object in an arbitrary parsed-output tree whose `status`
+ * is literally `"VERIFIED"` — matches both `richEvidenceClaim` and
+ * `marketNumber` shapes, since no other status enum used across PRISM's
+ * phases takes that exact value. First introduced for Phase 07's
+ * composer, promoted here once Phase 08 needed the identical count.
+ */
+export function countVerifiedClaims(value: unknown): number {
+  let count = 0;
+  if (Array.isArray(value)) {
+    for (const item of value) count += countVerifiedClaims(item);
+    return count;
+  }
+  if (value && typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    if (obj.status === "VERIFIED") count += 1;
+    for (const val of Object.values(obj)) count += countVerifiedClaims(val);
+  }
+  return count;
+}

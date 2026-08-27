@@ -4,7 +4,7 @@ import { runFeasibilityAgent } from "@/lib/agents/feasibility-agent";
 import { getAiProvider, type AiProvider, type AiResult } from "@/lib/ai";
 import type { PhaseExecutionContext } from "@/lib/orchestrator/types";
 import { marketInvestmentAnalysisSchema } from "@/lib/phases/market-investment/schema";
-import { collectCitedSourceIds } from "@/lib/prism/evidence";
+import { collectCitedSourceIds, countVerifiedClaims } from "@/lib/prism/evidence";
 import type { ProjectMode } from "@/lib/prism/modes";
 
 import {
@@ -18,21 +18,6 @@ const POSITIVE_OVERALL_STATUSES = new Set(["HIGHLY_FEASIBLE", "FEASIBLE"]);
 
 function invalidOutput<T>(message: string, raw: unknown): AiResult<T> {
   return { status: "invalid_output", message, raw: JSON.stringify(raw) };
-}
-
-/** Counts every object in the tree whose `status` is literally `"VERIFIED"` — matches both `richEvidenceClaim` and `marketNumber` shapes, since no other status enum in this schema uses that value. */
-function countVerifiedClaims(value: unknown): number {
-  let count = 0;
-  if (Array.isArray(value)) {
-    for (const item of value) count += countVerifiedClaims(item);
-    return count;
-  }
-  if (value && typeof value === "object") {
-    const obj = value as Record<string, unknown>;
-    if (obj.status === "VERIFIED") count += 1;
-    for (const val of Object.values(obj)) count += countVerifiedClaims(val);
-  }
-  return count;
 }
 
 const MODE_FIELD: Record<ProjectMode, "hackathon" | "pbl" | "startup" | "research" | "zeroDegree"> = {
