@@ -37,6 +37,7 @@ export function createMockDb(
     builder.select = vi.fn(chain);
     builder.eq = vi.fn(chain);
     builder.in = vi.fn(chain);
+    builder.order = vi.fn(chain);
     builder.insert = vi.fn(chain);
     builder.update = vi.fn(chain);
     builder.maybeSingle = vi.fn(() => Promise.resolve(result));
