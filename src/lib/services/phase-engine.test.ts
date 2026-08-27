@@ -468,6 +468,86 @@ describe("executePhaseAction: run", () => {
   });
 });
 
+describe("executePhaseAction: concurrent run-start race safety", () => {
+  it("turns a database unique-constraint violation on the first insert into a typed conflict, not a raw database error or a duplicate row", async () => {
+    // Two near-simultaneous "run" requests for a phase that has never run
+    // both pass the in-memory conflict check before either has written a
+    // row — the `unique (session_id, phase_key)` constraint is what
+    // actually stops the loser's INSERT. This proves that failure
+    // surfaces as a friendly, retryable "conflict", not an opaque 500.
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [rows([])],
+    });
+    const admin = createMockDb({
+      analysis_phases: [
+        dbError(
+          'duplicate key value violates unique constraint "analysis_phases_session_id_phase_key_key"',
+          "23505",
+        ),
+      ],
+    });
+    const provider = fakeProvider({ status: "ok", model: "fake-model", data: validAnatomy });
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "problem_intelligence",
+      action: "run",
+      aiProvider: provider,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("conflict");
+      expect(result.message).toMatch(/already running/i);
+    }
+    // The race is caught before the agent ever runs — no doubled AI spend.
+    expect(provider.generateStructured).not.toHaveBeenCalled();
+  });
+
+  it("treats a no-op conditional update (another request already flipped it to running) as a conflict, not a silent second execution", async () => {
+    // A failed phase being retried, or an approved one being regenerated,
+    // updates an *existing* row instead of inserting — the unique
+    // constraint can't help there. The atomic `.neq("status", "running")`
+    // guard is what stops a second concurrent request from also flipping
+    // it to running and re-running the agent a second time.
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [rows([phaseRow({ status: "failed" })])],
+    });
+    const admin = createMockDb({
+      // The conditional UPDATE's WHERE clause matched zero rows because a
+      // concurrent request already won the race and set status="running".
+      analysis_phases: [noRow],
+    });
+    const provider = fakeProvider({ status: "ok", model: "fake-model", data: validAnatomy });
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "problem_intelligence",
+      action: "run",
+      aiProvider: provider,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("conflict");
+      expect(result.message).toMatch(/already running/i);
+    }
+    expect(provider.generateStructured).not.toHaveBeenCalled();
+  });
+});
+
 describe("executePhaseAction: regenerate", () => {
   it("refuses to regenerate a phase that has never run", async () => {
     const supabase = createMockDb({

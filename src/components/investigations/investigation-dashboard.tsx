@@ -12,6 +12,18 @@ import type { AnalysisSessionRow, PhaseStateDTO, ProblemStatementRow, ProjectRow
 import { discoveryDialogue, phaseTransitionDialogue, welcomeDialogue } from "@/lib/voice/dialogue";
 import { useVoiceConsultant } from "@/lib/voice/voice-context";
 
+/**
+ * Every phase action is a single request/response round trip — there's
+ * no background job to poll, so this fetch is the only thing standing
+ * between the UI and an infinite "Investigating..." spinner if a
+ * provider or the network genuinely hangs. The server side already
+ * bounds each Gemini call (see gemini-provider.ts), but this is a
+ * second, independent backstop: if it fires, the user sees a real,
+ * retryable error instead of a frozen page. 5 minutes comfortably
+ * covers even a multi-agent phase's worst ordinary case.
+ */
+const PHASE_ACTION_TIMEOUT_MS = 5 * 60 * 1000;
+
 export function InvestigationDashboard({
   sessionId,
   project,
@@ -65,11 +77,15 @@ export function InvestigationDashboard({
     setPending(true);
     setError(null);
 
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), PHASE_ACTION_TIMEOUT_MS);
+
     try {
       const response = await fetch(`/api/sessions/${sessionId}/phases/${phaseKey}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action }),
+        signal: controller.signal,
       });
 
       const body = (await response.json().catch(() => null)) as PhaseStateDTO | { error?: string } | null;
@@ -102,9 +118,16 @@ export function InvestigationDashboard({
           speak(phaseTransitionDialogue(next.order, next.title));
         }
       }
-    } catch {
-      setError("A network error stopped that action from completing. Please try again.");
+    } catch (err) {
+      const timedOut = err instanceof DOMException && err.name === "AbortError";
+      setError(
+        timedOut
+          ? "This is taking far longer than expected and may have stalled. Select this phase again to check its latest status, or retry."
+          : "A network error stopped that action from completing. Please try again.",
+      );
       setPending(false);
+    } finally {
+      clearTimeout(timeout);
     }
   }
 

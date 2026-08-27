@@ -51,11 +51,17 @@ export function VoiceConsultantProvider({ children }: { children: React.ReactNod
   const speak = React.useCallback(
     (text: string) => {
       if (muted || !supported) return;
-      void provider.speak(text, {
-        rate: preferences.rate,
-        volume: preferences.volume,
-        voiceURI: preferences.voiceURI,
-      });
+      // Fire-and-forget by design — narration never blocks the caller.
+      // The `.catch` exists purely so a future/third-party VoiceProvider
+      // that genuinely rejects can't turn into an unhandled promise
+      // rejection; a failed narration is still a no-op investigation-wise.
+      void provider
+        .speak(text, {
+          rate: preferences.rate,
+          volume: preferences.volume,
+          voiceURI: preferences.voiceURI,
+        })
+        .catch(() => {});
     },
     [muted, supported, provider, preferences],
   );

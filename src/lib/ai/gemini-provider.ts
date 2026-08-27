@@ -20,6 +20,24 @@ function looksLikeModelUnavailable(message: string): boolean {
   );
 }
 
+/**
+ * The SDK has no default request timeout of its own — an unresponsive
+ * Gemini backend would otherwise hang this call (and the phase-run HTTP
+ * request awaiting it) indefinitely, leaving the UI stuck on
+ * "Investigating..." forever. 120s is generous enough for a large
+ * structured-output response with extended thinking (observed real
+ * calls complete in well under 30s) while still guaranteeing the phase
+ * engine always reaches a terminal `failed` state instead of hanging.
+ */
+const REQUEST_TIMEOUT_MS = 120_000;
+
+function looksLikeTimeout(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.name === "AbortError" || /deadline|timeout/i.test(error.message))
+  );
+}
+
 export class GeminiProvider implements AiProvider {
   readonly name = "gemini";
   private readonly client: GoogleGenAI;
@@ -47,6 +65,7 @@ export class GeminiProvider implements AiProvider {
           temperature: params.temperature ?? 0.4,
           responseMimeType: "application/json",
           responseJsonSchema: jsonSchema,
+          httpOptions: { timeout: REQUEST_TIMEOUT_MS },
         },
       });
 
@@ -98,6 +117,13 @@ export class GeminiProvider implements AiProvider {
           : undefined,
       };
     } catch (error) {
+      if (looksLikeTimeout(error)) {
+        return {
+          status: "error",
+          message: `Gemini request timed out after ${REQUEST_TIMEOUT_MS / 1000}s.`,
+        };
+      }
+
       const message = error instanceof Error ? error.message : String(error);
 
       if (looksLikeModelUnavailable(message)) {

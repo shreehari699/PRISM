@@ -18,21 +18,32 @@ export class BrowserSpeechProvider implements VoiceProvider {
     if (!this.isSupported()) return Promise.resolve();
 
     return new Promise((resolve) => {
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = options?.rate ?? 0.98;
-      utterance.pitch = options?.pitch ?? 1;
-      utterance.volume = options?.volume ?? 1;
+      // Narration is a pure enhancement — nothing about an investigation
+      // depends on it — so any failure here resolves rather than rejects.
+      // Some browsers throw synchronously (e.g. `speak()` on a
+      // `speechSynthesis` left in a bad state after rapid cancellation),
+      // which without this guard would reject this promise and, since
+      // callers intentionally never await narration, surface as an
+      // unhandled promise rejection in the console.
+      try {
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = options?.rate ?? 0.98;
+        utterance.pitch = options?.pitch ?? 1;
+        utterance.volume = options?.volume ?? 1;
 
-      const voices = window.speechSynthesis.getVoices();
-      const chosen =
-        (options?.voiceURI ? voices.find((v) => v.voiceURI === options.voiceURI) : undefined) ??
-        voices.find((v) => v.lang.startsWith("en") && v.localService);
-      if (chosen) utterance.voice = chosen;
+        const voices = window.speechSynthesis.getVoices();
+        const chosen =
+          (options?.voiceURI ? voices.find((v) => v.voiceURI === options.voiceURI) : undefined) ??
+          voices.find((v) => v.lang.startsWith("en") && v.localService);
+        if (chosen) utterance.voice = chosen;
 
-      utterance.onend = () => resolve();
-      utterance.onerror = () => resolve();
+        utterance.onend = () => resolve();
+        utterance.onerror = () => resolve();
 
-      window.speechSynthesis.speak(utterance);
+        window.speechSynthesis.speak(utterance);
+      } catch {
+        resolve();
+      }
     });
   }
 

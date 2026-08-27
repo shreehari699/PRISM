@@ -101,6 +101,41 @@ describe("GeminiProvider.generateStructured", () => {
     expect(result.status).toBe("error");
   });
 
+  it("bounds every request with an explicit HTTP timeout, so a hung backend can never leave a phase running forever", async () => {
+    generateContentMock.mockResolvedValue({
+      text: JSON.stringify({ problemSummary: "ok", severity: 10 }),
+    });
+
+    const provider = new GeminiProvider("test-key", "gemini-3.6-flash");
+    await provider.generateStructured({
+      systemInstruction: "sys",
+      prompt: "prompt",
+      schema,
+    });
+
+    const [[call]] = generateContentMock.mock.calls;
+    expect(call.config.httpOptions?.timeout).toEqual(expect.any(Number));
+    expect(call.config.httpOptions.timeout).toBeGreaterThan(0);
+  });
+
+  it("returns a distinct timeout error (never 'unavailable') when the request's own timeout fires", async () => {
+    const abortError = new Error("The operation timed out.");
+    abortError.name = "AbortError";
+    generateContentMock.mockRejectedValue(abortError);
+
+    const provider = new GeminiProvider("test-key", "gemini-3.6-flash");
+    const result = await provider.generateStructured({
+      systemInstruction: "sys",
+      prompt: "prompt",
+      schema,
+    });
+
+    expect(result.status).toBe("error");
+    if (result.status === "error") {
+      expect(result.message).toMatch(/timed out/i);
+    }
+  });
+
   it("reports a blocked prompt as an error rather than an empty success", async () => {
     generateContentMock.mockResolvedValue({
       text: undefined,

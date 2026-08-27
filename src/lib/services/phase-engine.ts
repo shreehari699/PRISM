@@ -139,6 +139,21 @@ export async function getPhaseState(
   });
 }
 
+/** Postgres unique_violation — see analysis_phases' `unique (session_id, phase_key)` constraint. */
+const UNIQUE_VIOLATION = "23505";
+
+/**
+ * Flips an existing phase row to "running" — but only if it isn't
+ * already. A plain unconditional UPDATE would let two near-simultaneous
+ * requests (double-click, or a slow first request outliving a retry)
+ * both "win" and both invoke the agent, silently doubling AI/research
+ * spend even though only one write survives. The `.neq("status",
+ * "running")` makes the transition atomic and conditional: whichever
+ * request's UPDATE lands first is the only one whose WHERE clause still
+ * matches, so the loser's UPDATE affects zero rows and is told to treat
+ * this as "someone else already started it" instead of quietly
+ * re-running the agent.
+ */
 async function upsertRunningPhase(
   admin: DbClient,
   params: {
@@ -154,11 +169,18 @@ async function upsertRunningPhase(
       .from("analysis_phases")
       .update({ status: "running", version: params.version, error_message: null })
       .eq("id", params.existingId)
+      .neq("status", "running")
       .select()
       .maybeSingle();
 
-    if (error || !data) {
-      return fail("error", `Failed to update phase: ${error?.message}`);
+    if (error) {
+      return fail("error", `Failed to update phase: ${error.message}`);
+    }
+    if (!data) {
+      return fail(
+        "conflict",
+        `Phase "${params.phaseKey}" is already running — someone else's request started it first.`,
+      );
     }
     return ok(analysisPhaseRowSchema.parse(data));
   }
@@ -175,8 +197,22 @@ async function upsertRunningPhase(
     .select()
     .maybeSingle();
 
-  if (error || !data) {
-    return fail("error", `Failed to create phase: ${error?.message}`);
+  if (error) {
+    // A concurrent first "run" request can win the race and insert this
+    // exact (session_id, phase_key) row a moment before this one does —
+    // the database's unique constraint is what actually prevents the
+    // duplicate; this just turns that into a clear, retryable message
+    // instead of an opaque database error.
+    if (error.code === UNIQUE_VIOLATION) {
+      return fail(
+        "conflict",
+        `Phase "${params.phaseKey}" is already running — someone else's request started it first.`,
+      );
+    }
+    return fail("error", `Failed to create phase: ${error.message}`);
+  }
+  if (!data) {
+    return fail("error", "Failed to create phase: no row was returned.");
   }
   return ok(analysisPhaseRowSchema.parse(data));
 }

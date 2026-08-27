@@ -2,7 +2,10 @@ import { vi } from "vitest";
 
 import type { DbClient } from "@/lib/supabase/admin";
 
-type QueryResult = { data: unknown; error: { message: string } | null };
+type QueryResult = {
+  data: unknown;
+  error: { message: string; code?: string } | null;
+};
 
 /**
  * A minimal stand-in for a Supabase query builder chain. Real
@@ -36,6 +39,7 @@ export function createMockDb(
     const chain = () => builder;
     builder.select = vi.fn(chain);
     builder.eq = vi.fn(chain);
+    builder.neq = vi.fn(chain);
     builder.in = vi.fn(chain);
     builder.order = vi.fn(chain);
     builder.insert = vi.fn(chain);
@@ -64,6 +68,6 @@ export function rows<T extends Record<string, unknown>>(
 
 export const noRow: QueryResult = { data: null, error: null };
 
-export function dbError(message: string): QueryResult {
-  return { data: null, error: { message } };
+export function dbError(message: string, code?: string): QueryResult {
+  return { data: null, error: { message, code } };
 }
