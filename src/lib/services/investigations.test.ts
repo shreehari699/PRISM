@@ -51,9 +51,12 @@ describe("createInvestigationInputSchema", () => {
   });
 });
 
+const testUser = { email: "farmer-app@example.com", fullName: "Asha Rao" };
+
 describe("createInvestigation", () => {
-  it("creates a project, problem statement, and session in sequence", async () => {
+  it("ensures the caller's own profile exists, then creates a project, problem statement, and session in sequence", async () => {
     const db = createMockDb({
+      profiles: [noRow],
       projects: [
         row({
           id: "project-1",
@@ -90,7 +93,7 @@ describe("createInvestigation", () => {
       ],
     });
 
-    const result = await createInvestigation(db, "user-1", validInput);
+    const result = await createInvestigation(db, "user-1", validInput, testUser);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -102,12 +105,27 @@ describe("createInvestigation", () => {
     }
   });
 
+  it("returns a typed error if profile provisioning fails, without touching projects at all", async () => {
+    const db = createMockDb({
+      profiles: [dbError("new row violates row-level security policy")],
+    });
+
+    const result = await createInvestigation(db, "user-1", validInput, testUser);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("error");
+      expect(result.message).toMatch(/row-level security/);
+    }
+  });
+
   it("returns a typed error if project creation fails, without touching later tables", async () => {
     const db = createMockDb({
+      profiles: [noRow],
       projects: [dbError("permission denied")],
     });
 
-    const result = await createInvestigation(db, "user-1", validInput);
+    const result = await createInvestigation(db, "user-1", validInput, testUser);
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -118,6 +136,7 @@ describe("createInvestigation", () => {
 
   it("returns a typed error if the problem statement insert fails", async () => {
     const db = createMockDb({
+      profiles: [noRow],
       projects: [
         row({
           id: "project-1",
@@ -132,7 +151,7 @@ describe("createInvestigation", () => {
       problem_statements: [dbError("check constraint violated")],
     });
 
-    const result = await createInvestigation(db, "user-1", validInput);
+    const result = await createInvestigation(db, "user-1", validInput, testUser);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.message).toMatch(/check constraint violated/);

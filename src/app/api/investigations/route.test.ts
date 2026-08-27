@@ -78,6 +78,7 @@ describe("POST /api/investigations", () => {
       expect.anything(),
       "user-1",
       expect.objectContaining({ name: validBody.name }),
+      expect.objectContaining({ email: "", fullName: null }),
     );
   });
 
@@ -93,5 +94,35 @@ describe("POST /api/investigations", () => {
     expect(response.status).toBe(500);
     const body = await response.json();
     expect(body.error).toMatch(/permission denied/);
+  });
+
+  it("passes the authenticated user's real email and full name through for profile provisioning", async () => {
+    createUntypedClientMock.mockResolvedValue({
+      auth: {
+        getUser: vi.fn().mockResolvedValue({
+          data: {
+            user: {
+              id: "user-1",
+              email: "consultant@example.com",
+              user_metadata: { full_name: "Asha Rao" },
+            },
+          },
+          error: null,
+        }),
+      },
+    });
+    createInvestigationMock.mockResolvedValue({
+      ok: true,
+      data: { projectId: "p1", problemStatementId: "ps1", sessionId: "s1" },
+    });
+
+    await POST(jsonRequest(validBody));
+
+    expect(createInvestigationMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "user-1",
+      expect.anything(),
+      { email: "consultant@example.com", fullName: "Asha Rao" },
+    );
   });
 });

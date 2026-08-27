@@ -40,6 +40,7 @@ export function createMockDb(
     builder.order = vi.fn(chain);
     builder.insert = vi.fn(chain);
     builder.update = vi.fn(chain);
+    builder.upsert = vi.fn(chain);
     builder.maybeSingle = vi.fn(() => Promise.resolve(result));
     builder.then = (
       resolve: (value: QueryResult) => unknown,

@@ -42,6 +42,40 @@ export interface CreatedInvestigation {
 }
 
 /**
+ * Ensures the authenticated caller has a `profiles` row before anything
+ * that foreign-keys to it (`projects.user_id references profiles (id)`)
+ * gets written. Normally unnecessary — `handle_new_user()`
+ * (0002_profiles.sql) auto-provisions this on every new `auth.users`
+ * insert — but that trigger cannot retroactively backfill an account that
+ * existed before it did (e.g. a user who signed up while testing, before
+ * migrations were applied to this project). `ignoreDuplicates` makes this
+ * a no-op for the overwhelming common case where the profile already
+ * exists; it never overwrites an existing row's `full_name`/`organization`.
+ * Runs on the caller's own user-scoped client — `profiles_insert_own`
+ * (0009_profiles_insert_policy_and_backfill.sql) is what actually allows
+ * this, scoped to `id = auth.uid()`, so this can only ever create the
+ * caller's own profile, never anyone else's.
+ */
+async function ensureOwnProfile(
+  supabase: DbClient,
+  userId: string,
+  email: string,
+  fullName: string | null,
+): Promise<ServiceResult<true>> {
+  const { error } = await supabase
+    .from("profiles")
+    .upsert(
+      { id: userId, email, full_name: fullName },
+      { onConflict: "id", ignoreDuplicates: true },
+    );
+
+  if (error) {
+    return fail("error", `Failed to provision user profile: ${error.message}`);
+  }
+  return ok(true as const);
+}
+
+/**
  * Creates a project, its initial problem statement, and the analysis
  * session that will drive it through the ten PRISM phases. Every insert
  * runs on the caller's user-scoped client (not the admin client) —
@@ -54,7 +88,11 @@ export async function createInvestigation(
   supabase: DbClient,
   userId: string,
   input: CreateInvestigationInput,
+  user: { email: string; fullName: string | null },
 ): Promise<ServiceResult<CreatedInvestigation>> {
+  const profileResult = await ensureOwnProfile(supabase, userId, user.email, user.fullName);
+  if (!profileResult.ok) return profileResult;
+
   const { data: projectRow, error: projectError } = await supabase
     .from("projects")
     .insert({ user_id: userId, name: input.name, mode: input.mode })

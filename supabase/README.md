@@ -29,6 +29,7 @@ npx supabase db push
 | `0006_reports_voice_usage.sql` | `reports`, `voice_sessions`, `usage_tracking` |
 | `0007_row_level_security.sql` | RLS policies for every table above |
 | `0008_usage_functions.sql` | `increment_usage()` — atomic, service-role-only usage counter |
+| `0009_profiles_insert_policy_and_backfill.sql` | Missing `profiles` INSERT policy (matches SECURITY.md's documented model) + one-time backfill for any `auth.users` row that predates the auto-provisioning trigger |
 
 See `SECURITY.md` at the repo root for the RLS design rationale.
 

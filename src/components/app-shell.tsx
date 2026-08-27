@@ -63,7 +63,7 @@ export function AppShell({
                     !pathname.match(/^\/investigations\/[^/]+$/));
                 return (
                   <Link
-                    key={item.href}
+                    key={item.label}
                     href={item.href}
                     aria-current={active ? "page" : undefined}
                     className={cn(
@@ -107,7 +107,7 @@ export function AppShell({
           <nav aria-label="Primary" className="border-t border-border md:hidden">
             <ul className="flex flex-col gap-1 p-3">
               {NAV_ITEMS.map((item) => (
-                <li key={item.href}>
+                <li key={item.label}>
                   <Link
                     href={item.href}
                     onClick={() => setMobileOpen(false)}

@@ -83,7 +83,10 @@ export async function POST(request: Request) {
     );
   }
 
-  const result = await createInvestigation(supabase, user.id, parsed.data);
+  const result = await createInvestigation(supabase, user.id, parsed.data, {
+    email: user.email ?? "",
+    fullName: typeof user.user_metadata?.full_name === "string" ? user.user_metadata.full_name : null,
+  });
 
   if (!result.ok) {
     return NextResponse.json(
