@@ -1,23 +1,20 @@
+import { FileQuestion } from "lucide-react";
 import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
 
 export default function NotFound() {
   return (
-    <main className="flex flex-1 flex-col items-center justify-center gap-4 px-6 py-32 text-center">
-      <p className="text-sm font-medium tracking-widest text-muted-foreground uppercase">
-        404
+    <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 px-6 text-center">
+      <FileQuestion className="size-8 text-muted-foreground" aria-hidden="true" />
+      <h1 className="text-xl font-semibold tracking-tight">Not found</h1>
+      <p className="max-w-md text-sm text-muted-foreground">
+        This page, or the investigation it points to, doesn&apos;t exist — or you don&apos;t have
+        access to it.
       </p>
-      <h1 className="text-2xl font-semibold tracking-tight">
-        This page doesn&apos;t exist.
-      </h1>
-      <p className="max-w-md text-muted-foreground">
-        The page you&apos;re looking for was moved, renamed, or never
-        existed.
-      </p>
-      <Button asChild className="mt-2">
-        <Link href="/">Back to PRISM</Link>
+      <Button variant="prism" asChild>
+        <Link href="/investigations">Back to investigations</Link>
       </Button>
-    </main>
+    </div>
   );
 }
