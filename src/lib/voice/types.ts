@@ -13,7 +13,10 @@ export interface VoiceProvider {
   /** True if this provider can actually speak in the current environment (e.g. `speechSynthesis` exists). */
   isSupported(): boolean;
   /** Speaks `text`. Resolves once speech finishes (or immediately if unsupported/interrupted). */
-  speak(text: string, options?: { rate?: number; pitch?: number }): Promise<void>;
+  speak(
+    text: string,
+    options?: { rate?: number; pitch?: number; volume?: number; voiceURI?: string | null },
+  ): Promise<void>;
   /** Stops any speech in progress. */
   cancel(): void;
 }

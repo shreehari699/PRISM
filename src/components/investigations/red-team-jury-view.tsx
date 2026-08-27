@@ -1,4 +1,5 @@
 import { Flame, Gavel } from "lucide-react";
+import * as React from "react";
 
 import { DetailsSection } from "@/components/investigations/details-section";
 import { GenericPhaseOutput } from "@/components/investigations/generic-phase-output";
@@ -8,6 +9,8 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import type { JuryPanel, JuryPerspectiveReview } from "@/lib/agents/validation-agent/schema";
 import type { PocValidationAnalysis } from "@/lib/phases/poc-validation/schema";
+import { redTeamIntroDialogue } from "@/lib/voice/dialogue";
+import { useVoiceConsultant } from "@/lib/voice/voice-context";
 
 const JUDGE_LABELS: Record<keyof JuryPanel, string> = {
   technicalJudge: "Technical Judge",
@@ -73,6 +76,17 @@ export function RedTeamJuryView({ output }: { output: PocValidationAnalysis }) {
   const fragileAssumption = output.assumptionRegister.find(
     (a) => a.assumptionId === output.redTeamReview.mostFragileAssumptionId,
   );
+  const { speak } = useVoiceConsultant();
+  const spoken = React.useRef(false);
+
+  React.useEffect(() => {
+    if (spoken.current) return;
+    spoken.current = true;
+    speak(redTeamIntroDialogue());
+    // Fires once when this phase's review is first shown — `speak` is a
+    // stable identity from voice context, not a dependency to react to.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="flex flex-col gap-8">

@@ -1,6 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { Volume2 } from "lucide-react";
 import * as React from "react";
 
 import { Button } from "@/components/ui/button";
@@ -10,6 +11,7 @@ import {
   markIntroSeen,
   subscribeIntroSeen,
 } from "@/lib/intro-store";
+import { useVoiceConsultant } from "@/lib/voice/voice-context";
 
 const LINES = [
   { text: "Welcome to PRISM.", duration: 2200 },
@@ -35,15 +37,31 @@ export function IntroExperience() {
   );
   const [dismissed, setDismissed] = React.useState(false);
   const [lineIndex, setLineIndex] = React.useState(0);
+  const [voiceStarted, setVoiceStarted] = React.useState(false);
   const shouldReduceMotion = useReducedMotion();
+  const { muted, toggleMuted, supported, speak, stop } = useVoiceConsultant();
 
   const visible = !introSeen && !dismissed;
   const showFooter = lineIndex >= LINES.length;
 
   const finish = React.useCallback(() => {
+    stop();
     setDismissed(true);
     markIntroSeen();
-  }, []);
+  }, [stop]);
+
+  // Browsers only allow SpeechSynthesis to actually produce audio once the
+  // page has real user activation — a `speak()` call fired automatically on
+  // mount would be silently dropped in most browsers. This button is that
+  // required user gesture: it unmutes (if needed) and speaks the line
+  // already on screen synchronously inside the click handler, and every
+  // later line in this same intro then narrates too, since activation
+  // persists for the rest of the page's lifetime once granted.
+  function enableVoice() {
+    if (muted) toggleMuted();
+    setVoiceStarted(true);
+    if (!showFooter) speak(LINES[lineIndex].text);
+  }
 
   React.useEffect(() => {
     if (!visible) return;
@@ -53,12 +71,17 @@ export function IntroExperience() {
       return () => clearTimeout(timer);
     }
 
+    if (voiceStarted) speak(LINES[lineIndex].text);
+
     const timer = setTimeout(
       () => setLineIndex((i) => i + 1),
       shouldReduceMotion ? 900 : LINES[lineIndex].duration,
     );
     return () => clearTimeout(timer);
-  }, [visible, lineIndex, showFooter, finish, shouldReduceMotion]);
+    // `speak` intentionally excluded: it's a stable identity from voice
+    // context, not a value this effect should re-run for.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, lineIndex, showFooter, finish, shouldReduceMotion, voiceStarted]);
 
   if (!visible) return null;
 
@@ -71,15 +94,17 @@ export function IntroExperience() {
       aria-label="PRISM introduction"
       className="fixed inset-0 z-100 flex flex-col items-center justify-center bg-background px-6 text-center"
     >
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        onClick={finish}
-        className="absolute top-6 right-6 text-muted-foreground"
-      >
-        Skip intro
-      </Button>
+      <div className="absolute top-6 right-6 flex items-center gap-2">
+        {supported && !voiceStarted ? (
+          <Button type="button" variant="outline" size="sm" onClick={enableVoice}>
+            <Volume2 />
+            Enter with voice
+          </Button>
+        ) : null}
+        <Button type="button" variant="ghost" size="sm" onClick={finish} className="text-muted-foreground">
+          Skip intro
+        </Button>
+      </div>
 
       <AnimatePresence mode="wait">
         {current ? (

@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { VoiceMuteToggle } from "@/components/voice/voice-mute-toggle";
+import { VoicePreferencesForm } from "@/components/voice/voice-preferences-form";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function SettingsPage() {
@@ -47,8 +48,12 @@ export default async function SettingsPage() {
             speech synthesis. Nothing is sent to a third-party voice service.
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <VoiceMuteToggle />
+        <CardContent className="flex flex-col gap-5">
+          <div className="flex items-center justify-between gap-4">
+            <span className="text-sm font-medium">Voice narration</span>
+            <VoiceMuteToggle />
+          </div>
+          <VoicePreferencesForm />
         </CardContent>
       </Card>
     </div>

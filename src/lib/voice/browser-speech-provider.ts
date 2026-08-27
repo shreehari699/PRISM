@@ -11,17 +11,23 @@ export class BrowserSpeechProvider implements VoiceProvider {
     return typeof window !== "undefined" && "speechSynthesis" in window;
   }
 
-  speak(text: string, options?: { rate?: number; pitch?: number }): Promise<void> {
+  speak(
+    text: string,
+    options?: { rate?: number; pitch?: number; volume?: number; voiceURI?: string | null },
+  ): Promise<void> {
     if (!this.isSupported()) return Promise.resolve();
 
     return new Promise((resolve) => {
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.rate = options?.rate ?? 0.98;
       utterance.pitch = options?.pitch ?? 1;
+      utterance.volume = options?.volume ?? 1;
 
       const voices = window.speechSynthesis.getVoices();
-      const preferred = voices.find((v) => v.lang.startsWith("en") && v.localService);
-      if (preferred) utterance.voice = preferred;
+      const chosen =
+        (options?.voiceURI ? voices.find((v) => v.voiceURI === options.voiceURI) : undefined) ??
+        voices.find((v) => v.lang.startsWith("en") && v.localService);
+      if (chosen) utterance.voice = chosen;
 
       utterance.onend = () => resolve();
       utterance.onerror = () => resolve();

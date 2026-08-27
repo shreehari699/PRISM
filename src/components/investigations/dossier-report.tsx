@@ -1,9 +1,13 @@
+import * as React from "react";
+
 import { DetailsSection } from "@/components/investigations/details-section";
 import { FinalVerdict } from "@/components/investigations/final-verdict";
 import { GenericPhaseOutput } from "@/components/investigations/generic-phase-output";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import type { IntelligenceDossierAnalysis } from "@/lib/phases/intelligence-dossier/schema";
+import { verdictDialogue } from "@/lib/voice/dialogue";
+import { useVoiceConsultant } from "@/lib/voice/voice-context";
 
 const EXECUTIVE_QUESTIONS: { key: keyof IntelligenceDossierAnalysis["executiveSummary"]; question: string }[] = [
   { key: "whatIsTheProblem", question: "What is the problem?" },
@@ -46,6 +50,19 @@ const IMPORTANCE_VARIANT: Record<string, "destructive" | "assumption" | "outline
  * schema-agnostic viewer used elsewhere rather than re-authored here.
  */
 export function DossierReport({ dossier }: { dossier: IntelligenceDossierAnalysis }) {
+  const { speak } = useVoiceConsultant();
+  const spoken = React.useRef(false);
+
+  React.useEffect(() => {
+    if (spoken.current) return;
+    spoken.current = true;
+    const v = dossier.finalVerdict;
+    speak(verdictDialogue(v.decision, v.confidence, v.reason));
+    // Fires once when the dossier is first shown — `speak` is a stable
+    // identity from voice context, not a dependency to react to.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <div className="flex flex-col gap-8">
       <FinalVerdict verdict={dossier.finalVerdict} />

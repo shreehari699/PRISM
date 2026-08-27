@@ -12,6 +12,11 @@ import {
   subscribeSpeechSupport,
 } from "./mute-store";
 import { getVoiceProvider } from "./provider";
+import {
+  getVoicePreferencesServerSnapshot,
+  getVoicePreferencesSnapshot,
+  subscribeVoicePreferences,
+} from "./voice-preferences";
 
 interface VoiceConsultantContextValue {
   muted: boolean;
@@ -31,6 +36,11 @@ export function VoiceConsultantProvider({ children }: { children: React.ReactNod
     getSpeechSupportServerSnapshot,
   );
   const provider = React.useMemo(() => getVoiceProvider(), []);
+  const preferences = React.useSyncExternalStore(
+    subscribeVoicePreferences,
+    getVoicePreferencesSnapshot,
+    getVoicePreferencesServerSnapshot,
+  );
 
   const toggleMuted = React.useCallback(() => {
     const next = !muted;
@@ -41,9 +51,13 @@ export function VoiceConsultantProvider({ children }: { children: React.ReactNod
   const speak = React.useCallback(
     (text: string) => {
       if (muted || !supported) return;
-      void provider.speak(text);
+      void provider.speak(text, {
+        rate: preferences.rate,
+        volume: preferences.volume,
+        voiceURI: preferences.voiceURI,
+      });
     },
-    [muted, supported, provider],
+    [muted, supported, provider, preferences],
   );
 
   const stop = React.useCallback(() => provider.cancel(), [provider]);
