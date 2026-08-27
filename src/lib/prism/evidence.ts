@@ -73,3 +73,31 @@ export const richEvidenceClaimSchema = z
   });
 
 export type RichEvidenceClaim = z.infer<typeof richEvidenceClaimSchema>;
+
+/**
+ * Walks an arbitrary parsed-output tree and collects every string found
+ * under a `sourceIds` array anywhere in it — every claim/marketNumber
+ * schema across every phase uses that exact field name for citations, so
+ * this one generic walk replaces having to enumerate each of the dozens
+ * of individual claim/number fields by hand in every phase composer,
+ * while still being conservative: it can only ever find MORE citations
+ * to validate, never fewer. First introduced for Phase 06's composer,
+ * promoted here once Phase 07 needed the identical walk.
+ */
+export function collectCitedSourceIds(value: unknown, into: Set<string>): void {
+  if (Array.isArray(value)) {
+    for (const item of value) collectCitedSourceIds(item, into);
+    return;
+  }
+  if (value && typeof value === "object") {
+    for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+      if (key === "sourceIds" && Array.isArray(val)) {
+        for (const id of val) {
+          if (typeof id === "string") into.add(id);
+        }
+      } else {
+        collectCitedSourceIds(val, into);
+      }
+    }
+  }
+}

@@ -60,8 +60,8 @@ holds:
   Agent, Existing Solution Agent, Gap Agent, Opportunity Agent,
   Innovation Agent, Market Agent, Investment Agent, Feasibility Agent,
   Solution Consultant, Validation Agent, Jury Agent, Report Generator),
-  each mapped to the phase it belongs to. The first ten of these are
-  implemented (see §2a/§2b/§2c/§2d/§2e/§2f). Phase 06's Market Agent
+  each mapped to the phase it belongs to. The first eleven of these are
+  implemented (see §2a/§2b/§2c/§2d/§2e/§2f/§2g). Phase 06's Market Agent
   internally depends on a Market Research Agent component
   (`src/lib/agents/market-research-agent/`) the same way Phase 03's
   named Research Agent internally splits into a question-generator and
@@ -81,12 +81,13 @@ holds:
     statement, and every upstream phase's output
 
 **(planned)** The per-phase system instructions, prompts, and Zod output
-schemas for the 5 agents beyond the Problem Analyst, Stakeholder
+schemas for the 4 agents beyond the Problem Analyst, Stakeholder
 Analyst, Pain Analyst, Research Agent, Existing Solution Agent, Gap
-Agent, Opportunity Agent, Innovation Agent, Market Agent, and Investment
-Agent (see §2a/§2b/§2c/§2d/§2e/§2f) — this foundation establishes where
-they plug in (`AiProvider.generateStructured` via the phase registry),
-not their content.
+Agent, Opportunity Agent, Innovation Agent, Market Agent, Investment
+Agent, and Feasibility Agent (see §2a/§2b/§2c/§2d/§2e/§2f/§2g) — this
+foundation establishes where they plug in
+(`AiProvider.generateStructured` via the phase registry), not their
+content.
 
 ### 2a. Phase engine and Phase 01 — Problem Intelligence (reference implementation)
 
@@ -622,7 +623,97 @@ over the one shared abstraction, not a second one.
 - **Registered** in `src/lib/phases/registry.ts` exactly like the prior
   phases — no new API routes, no route changes.
 
-Phases 07–10 extend this the same way: add an entry to the agent
+### 2g. Phase 07 — Technical + Implementation Feasibility Intelligence
+
+A single agent, like Phase 01 and Phase 04 — the phase catalog's own
+`agents: ["feasibility_agent"]` roster entry — no new Tavily research of
+its own. Phase 07 answers "can this actually be built, deployed,
+adopted, and scaled", deliberately distinct from every prior phase's
+"is this a good idea": a project can have high impact, a strong market,
+and real innovation (Phases 01–06 already established that) and still
+be technically infeasible, too expensive, too data-dependent, or too
+complex for the team — PRISM must be willing to say so.
+
+- **No new research**: unlike Phase 03/06, Phase 07 reasons entirely
+  over Phases 01–06's already-collected evidence. This mirrors Phase
+  04's precedent exactly (a single named agent, zero new Tavily calls,
+  uncertain items become `validationQuestions` for a human or a later
+  phase) rather than inventing a second internal research agent the
+  phase catalog's roster doesn't call for. Every cited source resolves
+  against Phase 06's already-combined evidence list
+  (`market_investment.marketEvidence.sources`, itself Phase 03 reused +
+  Phase 06 researched) — reusing Phase 03's sources is achieved
+  transitively through Phase 06's own persisted output, not a third
+  re-fetch.
+- **The leading opportunity, reused**: rather than re-deriving "which
+  opportunity is this" a third time, Phase 07 imports
+  `selectLeadingOpportunity` — exported from Phase 06's own module once
+  Phase 07 needed the identical selection — instead of duplicating that
+  algorithm.
+- **`src/lib/agents/feasibility-agent/`** — mode-aware from the ground
+  up: `modeFeasibility` carries one block per project mode (HACKATHON,
+  PBL, STARTUP, RESEARCH, ZERO_DEGREE), and only the one matching
+  `context.mode` is ever populated, the rest `null` — the composer
+  enforces that invariant. Each mode's block captures only what's
+  genuinely mode-unique (HACKATHON's access checks and MUST/SHOULD/
+  COULD/DO-NOT-BUILD framing including explicit 24-hour/48-hour/1-week
+  duration checks; PBL's academic rigor questions; STARTUP's customer-
+  deployment/compliance/operational-readiness angle; RESEARCH's novelty/
+  reproducibility/experimental-design; ZERO_DEGREE's strategic-fit/
+  productization/reuse-potential) — technical, data, cost, team, and
+  scalability feasibility are universal sections evaluated once,
+  reframed by mode through the prompt rather than duplicated five times.
+  - Thirteen technical dimensions and nine software components are each
+    a fixed, always-fully-present object (never a sparse array) — the
+    same non-sparse shape as Phase 03's `researchCoverageSchema` and
+    Phase 06's `scalabilitySchema`.
+  - `aiFeasibility`/`hardwareFeasibility` are `null` whenever AI or
+    hardware genuinely isn't involved — never forced.
+  - Every time/cost figure reuses Phase 06's own `marketNumberSchema`
+    unchanged (`src/lib/prism/market.ts`) rather than a third "estimate"
+    primitive: `MODEL_ESTIMATE` with its calculation shown, `VERIFIED`
+    only with a cited source, `UNKNOWN` otherwise.
+  - Every risk in the risk register reuses the existing `Score` module's
+    `scoreBasisSchema` (`"ai_estimate"`) for its `basis` field — exactly
+    the "MODEL_ESTIMATE" label the spec asks for, no new vocabulary.
+  - Team capability is `UNKNOWN` by default and stays that way absent
+    real roster evidence — PRISM has no team-roster data to check
+    against, so guessing was never an option.
+- **`src/lib/phases/technical-feasibility/`** — the composer enforces
+  three things beyond what Zod alone can check:
+  - **Mode consistency**: `modeFeasibility.mode` must equal
+    `context.mode`, and exactly the one matching block is populated —
+    any other combination is rejected as `invalid_output`.
+  - **Source citations**: every `sourceIds` reference anywhere in the
+    output (via the shared `collectCitedSourceIds` walk, promoted to
+    `src/lib/prism/evidence.ts` once Phase 07 needed the identical walk
+    Phase 06's composer already had) must resolve against Phase 06's
+    combined source list.
+  - **No hidden blocker**: `overallFeasibility` cannot be
+    `HIGHLY_FEASIBLE` or `FEASIBLE` while a critical blocker exists, a
+    technical dimension is `INFEASIBLE`, or a required dataset is
+    `UNAVAILABLE` — a single critical dependency caps the result
+    regardless of how well everything else scores, mechanically
+    enforced rather than merely requested of the model (the spec's own
+    example: Technical=HIGH, Data=LOW ⇒ Overall can only be
+    `CONDITIONALLY_FEASIBLE` at best).
+  `criticalBlockersSummary` (`NONE_IDENTIFIED` / `BLOCKERS_IDENTIFIED`)
+  and `evidenceSummary`'s numeric counts are computed here from the
+  pipeline's own data, continuing the "no fake numbers" split Phase 04's
+  gap-intelligence composer establishes between agent-supplied narrative
+  and composer-computed numbers.
+- **Dependency on Phase 01, 02, 04, AND 05**: enforced entirely by the
+  existing, unmodified `PrismOrchestrator.canEnterPhase` — no
+  Phase-07-specific gating logic. As with Phase 06, both
+  `existing_solutions` (Phase 03) and `market_investment` (Phase 06)
+  only have to have run, not be explicitly approved, since both carry
+  `requiresApproval: false` in the phase catalog.
+- **Persistence**: `analysis_phases.output_data` (jsonb), same pattern
+  as Phases 01–06. No new tables.
+- **Registered** in `src/lib/phases/registry.ts` exactly like the prior
+  phases — no new API routes, no route changes.
+
+Phases 08–10 extend this the same way: add an entry to the agent
 registry, and where a phase needs more than one agent, have that
 phase's `execute` internally call each and merge their output — the
 phase engine only ever sees one `AiResult`.
@@ -769,19 +860,19 @@ Per the scope of this foundation pass, the following are intentionally
 - Any investigation UI (problem input form, phase review/approval
   screens, dossier view, stakeholder/pain relationship graph, existing-
   solution comparison view, gap coverage matrix view, opportunity
-  landscape/ranking view, market/TAM-SAM-SOM/investment view) — Phases
-  01–06 exist as tested API + service layer only; see
-  §2a/§2b/§2c/§2d/§2e/§2f. The stakeholder/pain data model is built to
-  support a future network-graph view (`painPointIds` on each
-  stakeholder), but no visual graph exists.
-- Phases 07–10's agents, schemas, and prompts (the registry and engine
-  they plug into are done — see §2a/§2b/§2c/§2d/§2e/§2f)
+  landscape/ranking view, market/TAM-SAM-SOM/investment view,
+  feasibility/risk-register/roadmap view) — Phases 01–07 exist as tested
+  API + service layer only; see §2a/§2b/§2c/§2d/§2e/§2f/§2g. The
+  stakeholder/pain data model is built to support a future network-graph
+  view (`painPointIds` on each stakeholder), but no visual graph exists.
+- Phases 08–10's agents, schemas, and prompts (the registry and engine
+  they plug into are done — see §2a/§2b/§2c/§2d/§2e/§2f/§2g)
 - Populating the normalized `stakeholders` / `pain_points` /
   `research_sources` tables from Phase 02/03 output (currently
-  jsonb-only — see §2b/§2c). Phases 04, 05, and 06 have no
+  jsonb-only — see §2b/§2c). Phases 04, 05, 06, and 07 have no
   normalized-table counterpart in the existing schema at all — their
   output lives in `analysis_phases.output_data` only, by design (see
-  §2d/§2e/§2f).
+  §2d/§2e/§2f/§2g).
 - PDF upload handling for the `pdf_upload` input method (the schema and
   `source_file_url` column exist; nothing populates or reads a file yet)
 - The voice consultant and cinematic opening experience

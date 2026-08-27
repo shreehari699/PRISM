@@ -354,7 +354,7 @@ describe("executePhaseAction: run", () => {
       analysis_phases: [
         rows([
           // Every implemented phase approved, unblocking
-          // technical_feasibility (Phase 07), which has no registered
+          // solution_consultant (Phase 08), which has no registered
           // agent yet.
           phaseRow({ id: "phase-1", phase_key: "problem_intelligence", status: "approved" }),
           phaseRow({ id: "phase-2", phase_key: "stakeholder_pain", status: "approved" }),
@@ -362,6 +362,7 @@ describe("executePhaseAction: run", () => {
           phaseRow({ id: "phase-4", phase_key: "gap_intelligence", status: "approved" }),
           phaseRow({ id: "phase-5", phase_key: "opportunity_innovation", status: "approved" }),
           phaseRow({ id: "phase-6", phase_key: "market_investment", status: "approved" }),
+          phaseRow({ id: "phase-7", phase_key: "technical_feasibility", status: "approved" }),
         ]),
       ],
     });
@@ -372,7 +373,7 @@ describe("executePhaseAction: run", () => {
       admin,
       userId: "user-1",
       sessionId: "session-1",
-      phaseKey: "technical_feasibility",
+      phaseKey: "solution_consultant",
       action: "run",
     });
 
@@ -3548,6 +3549,677 @@ describe("executePhaseAction: market_investment (Phase 06) depends on approved P
       userId: "user-1",
       sessionId: "session-1",
       phaseKey: "opportunity_innovation",
+      action: "regenerate",
+      aiProvider: provider,
+    });
+
+    expect(result.ok).toBe(true);
+    const analysisPhaseCalls = (
+      admin.from as unknown as ReturnType<typeof vi.fn>
+    ).mock.calls.filter((call: unknown[]) => call[0] === "analysis_phases");
+    expect(analysisPhaseCalls).toHaveLength(3);
+  });
+});
+
+const mergedMarketInvestmentOutput = {
+  marketSummary: "s",
+  customerModel: null,
+  marketSegments: [],
+  competitiveLandscape: {
+    competitors: [],
+    summary: { claim: "x", status: "ASSUMPTION", sourceIds: [], confidence: "low", reasoning: "y" },
+  },
+  marketDrivers: { adoptionDrivers: [], adoptionBarriers: [] },
+  adoptionAnalysis: { factors: [], adoptionRisk: "UNKNOWN", reasoning: "n/a" },
+  marketEvidence: {
+    sources: [
+      {
+        sourceLocalId: "source-1",
+        title: "eNAM",
+        url: "https://enam.gov.in",
+        sourceType: "government",
+        retrievedAt: new Date().toISOString(),
+        snippet: "A national electronic trading platform.",
+        origin: "existing_solutions_reused",
+      },
+    ],
+    status: "COMPLETE",
+    narrative: "n/a",
+  },
+  tamAnalysis: { definition: "n/a", value: unknownMarketNumber() },
+  samAnalysis: { definition: "n/a", value: unknownMarketNumber() },
+  somAnalysis: { definition: "n/a", value: unknownMarketNumber() },
+  businessModels: [],
+  pricingHypotheses: [],
+  unitEconomics: {
+    customerAcquisitionCost: unknownMarketNumber(),
+    revenuePerCustomer: unknownMarketNumber(),
+    grossMargin: unknownMarketNumber(),
+    operationalCost: unknownMarketNumber(),
+    supportCost: unknownMarketNumber(),
+    infrastructureCost: unknownMarketNumber(),
+    paybackPeriod: unknownMarketNumber(),
+    narrative: "n/a",
+  },
+  scalability: {
+    technical: { level: "UNKNOWN", reasoning: "n/a" },
+    operational: { level: "UNKNOWN", reasoning: "n/a" },
+    geographic: { level: "UNKNOWN", reasoning: "n/a" },
+    customer: { level: "UNKNOWN", reasoning: "n/a" },
+    support: { level: "UNKNOWN", reasoning: "n/a" },
+    regulatory: { level: "UNKNOWN", reasoning: "n/a" },
+    data: { level: "UNKNOWN", reasoning: "n/a" },
+  },
+  investmentAnalysis: {
+    capitalIntensity: "MODERATE",
+    capitalIntensityReasoning: "r",
+    initialDevelopmentRequirements: [],
+    infrastructureRequirements: [],
+    teamRequirements: [],
+    operationalRequirements: [],
+    deploymentRequirements: [],
+    fundingStageRecommendation: "PRE_SEED",
+    fundingStageReasoning: "r",
+  },
+  valuationDrivers: { drivers: [], illustrativeScenario: null },
+  marketRealityCheck: { signal: "INSUFFICIENT_EVIDENCE", explanation: "e" },
+  investmentRealityCheck: { signal: "INSUFFICIENT_EVIDENCE", explanation: "e" },
+  marketScores: {
+    marketPotential: { value: 10, basis: "ai_estimate", reasoning: "n/a", confidence: "low" },
+    commercialPotential: { value: 10, basis: "ai_estimate", reasoning: "n/a", confidence: "low" },
+    adoptionPotential: { value: 10, basis: "ai_estimate", reasoning: "n/a", confidence: "low" },
+    scalability: { value: 10, basis: "ai_estimate", reasoning: "n/a", confidence: "low" },
+  },
+  investmentScores: {
+    investmentReadiness: { value: 10, basis: "ai_estimate", reasoning: "n/a", confidence: "low" },
+  },
+  evidenceSummary: {
+    totalSourcesReferenced: 1,
+    verifiedNumbersCount: 0,
+    modelEstimateNumbersCount: 0,
+    unknownNumbersCount: 11,
+    narrative: "n/a",
+  },
+  confidenceSummary: { overallConfidence: "INSUFFICIENT_EVIDENCE", narrative: "n/a" },
+  validationQuestions: [],
+  consultantMessage: "m",
+};
+
+const approvedPhasesThroughMarketInvestment = [
+  ...approvedPhasesThroughOpportunityInnovation,
+  phaseRow({
+    id: "phase-6",
+    phase_key: "market_investment",
+    status: "approved",
+    output_data: mergedMarketInvestmentOutput,
+  }),
+];
+
+function feasibilityTechnicalDimension() {
+  return { status: "UNKNOWN", reasoning: "n/a", confidence: "low", evidenceClaims: [] };
+}
+
+function feasibilitySoftwareComponent() {
+  return { status: "REQUIRES_BUILD", reasoning: "n/a" };
+}
+
+function feasibilityScalabilityAssessment() {
+  return { level: "UNKNOWN", reasoning: "n/a" };
+}
+
+function feasibilityScore() {
+  return { value: 20, basis: "ai_estimate", reasoning: "n/a", confidence: "low" };
+}
+
+const validFeasibilityAgentOutput = {
+  modeFeasibility: {
+    mode: "HACKATHON",
+    hackathon: {
+      timeAvailable: { claim: "x", status: "UNKNOWN", sourceIds: [], confidence: "low", reasoning: "y" },
+      teamSize: { claim: "x", status: "UNKNOWN", sourceIds: [], confidence: "low", reasoning: "y" },
+      teamSkills: { claim: "x", status: "UNKNOWN", sourceIds: [], confidence: "low", reasoning: "y" },
+      hardwareAccess: { claim: "x", status: "UNKNOWN", sourceIds: [], confidence: "low", reasoning: "y" },
+      softwareAccess: { claim: "x", status: "UNKNOWN", sourceIds: [], confidence: "low", reasoning: "y" },
+      apiAccess: { claim: "x", status: "UNKNOWN", sourceIds: [], confidence: "low", reasoning: "y" },
+      dataAccess: { claim: "x", status: "UNKNOWN", sourceIds: [], confidence: "low", reasoning: "y" },
+      prototypeScope: "a",
+      demoScope: "b",
+      deploymentScope: "c",
+      durationFeasibility: [],
+    },
+    pbl: null,
+    startup: null,
+    research: null,
+    zeroDegree: null,
+  },
+  technicalFeasibility: {
+    architecture: feasibilityTechnicalDimension(),
+    technologyMaturity: feasibilityTechnicalDimension(),
+    dependencies: feasibilityTechnicalDimension(),
+    apis: feasibilityTechnicalDimension(),
+    hardware: feasibilityTechnicalDimension(),
+    software: feasibilityTechnicalDimension(),
+    data: feasibilityTechnicalDimension(),
+    infrastructure: feasibilityTechnicalDimension(),
+    integration: feasibilityTechnicalDimension(),
+    security: feasibilityTechnicalDimension(),
+    performance: feasibilityTechnicalDimension(),
+    reliability: feasibilityTechnicalDimension(),
+    maintenance: feasibilityTechnicalDimension(),
+  },
+  dataFeasibility: { requirements: [], narrative: "n/a" },
+  aiFeasibility: null,
+  hardwareFeasibility: null,
+  softwareFeasibility: {
+    frontend: feasibilitySoftwareComponent(),
+    backend: feasibilitySoftwareComponent(),
+    database: feasibilitySoftwareComponent(),
+    api: feasibilitySoftwareComponent(),
+    authentication: feasibilitySoftwareComponent(),
+    deployment: feasibilitySoftwareComponent(),
+    mobileOrWeb: feasibilitySoftwareComponent(),
+    thirdPartyServices: feasibilitySoftwareComponent(),
+    openSourceDependencies: feasibilitySoftwareComponent(),
+  },
+  teamFeasibility: { skills: [], narrative: "n/a" },
+  timeFeasibility: {
+    minimumViableBuildTime: unknownMarketNumber(),
+    prototypeTime: unknownMarketNumber(),
+    productionTime: unknownMarketNumber(),
+    hackathonDurationFeasibility: [],
+  },
+  costFeasibility: {
+    developmentCost: unknownMarketNumber(),
+    hardwareCost: unknownMarketNumber(),
+    softwareCost: unknownMarketNumber(),
+    apiCost: unknownMarketNumber(),
+    infrastructureCost: unknownMarketNumber(),
+    deploymentCost: unknownMarketNumber(),
+    maintenanceCost: unknownMarketNumber(),
+  },
+  regulatorySafety: { items: [], narrative: "n/a" },
+  securityPrivacy: { considerations: [], securityRisk: "UNKNOWN", reasoning: "n/a" },
+  scalability: {
+    technical: feasibilityScalabilityAssessment(),
+    data: feasibilityScalabilityAssessment(),
+    infrastructure: feasibilityScalabilityAssessment(),
+    operational: feasibilityScalabilityAssessment(),
+    support: feasibilityScalabilityAssessment(),
+    geographic: feasibilityScalabilityAssessment(),
+    regulatory: feasibilityScalabilityAssessment(),
+  },
+  riskRegister: [],
+  buildScope: { mustBuild: [], shouldBuild: [], couldBuild: [], doNotBuild: [] },
+  feasibilityScores: {
+    technical: feasibilityScore(),
+    data: feasibilityScore(),
+    time: feasibilityScore(),
+    cost: feasibilityScore(),
+    team: feasibilityScore(),
+    deployment: feasibilityScore(),
+    scalability: feasibilityScore(),
+  },
+  overallFeasibility: { status: "INSUFFICIENT_EVIDENCE", explanation: "e" },
+  criticalBlockers: [],
+  feasibilityRealityCheck: { signal: "INSUFFICIENT_EVIDENCE", explanation: "e" },
+  implementationRoadmap: [
+    { phaseNumber: 0, title: "Preparation", description: "d", deliverables: [] },
+  ],
+  validationQuestions: [],
+  evidenceSummary: { narrative: "n/a" },
+  confidenceSummary: { overallConfidence: "INSUFFICIENT_EVIDENCE", narrative: "n/a" },
+  consultantMessage: "m",
+};
+
+describe("executePhaseAction: technical_feasibility (Phase 07) depends on approved Phase 01, 02, 04, 05, 06 AND has-run Phase 03", () => {
+  it("blocks Phase 07 when Phase 06 has never run", async () => {
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [rows(approvedPhasesThroughOpportunityInnovation)],
+    });
+    const admin = createMockDb({});
+    const provider = sequenceProvider([]);
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "technical_feasibility",
+      action: "run",
+      aiProvider: provider,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("conflict");
+      expect(result.message).toMatch(/has not been run yet/);
+    }
+    expect(provider.generateStructured).not.toHaveBeenCalled();
+  });
+
+  it("blocks Phase 07 when Phase 05 (an approval-gated upstream phase) is unapproved", async () => {
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [
+        rows([
+          ...approvedPhasesThroughGapIntelligence,
+          phaseRow({
+            id: "phase-5",
+            phase_key: "opportunity_innovation",
+            status: "awaiting_approval",
+            output_data: mergedOpportunityInnovationOutput,
+          }),
+          phaseRow({
+            id: "phase-6",
+            phase_key: "market_investment",
+            status: "approved",
+            output_data: mergedMarketInvestmentOutput,
+          }),
+        ]),
+      ],
+    });
+    const admin = createMockDb({});
+    const provider = sequenceProvider([]);
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "technical_feasibility",
+      action: "run",
+      aiProvider: provider,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("conflict");
+      expect(result.message).toMatch(/awaiting your approval/);
+    }
+    expect(provider.generateStructured).not.toHaveBeenCalled();
+  });
+
+  it("blocks Phase 07 when Phase 05 (an approval-gated upstream phase) is stale (needs_regeneration)", async () => {
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [
+        rows([
+          ...approvedPhasesThroughGapIntelligence,
+          phaseRow({
+            id: "phase-5",
+            phase_key: "opportunity_innovation",
+            status: "needs_regeneration",
+            output_data: mergedOpportunityInnovationOutput,
+          }),
+          phaseRow({
+            id: "phase-6",
+            phase_key: "market_investment",
+            status: "approved",
+            output_data: mergedMarketInvestmentOutput,
+          }),
+        ]),
+      ],
+    });
+    const admin = createMockDb({});
+    const provider = sequenceProvider([]);
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "technical_feasibility",
+      action: "run",
+      aiProvider: provider,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("conflict");
+    expect(provider.generateStructured).not.toHaveBeenCalled();
+  });
+
+  // existing_solutions (Phase 03) has requiresApproval: false, and so does
+  // market_investment (Phase 06) — the same unmodified gating applies
+  // unchanged to Phase 07: both only have to have run, not be explicitly
+  // approved.
+  it("allows Phase 07 to run while Phase 06 is only awaiting approval, since market_investment doesn't require it", async () => {
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [
+        rows([
+          ...approvedPhasesThroughOpportunityInnovation,
+          phaseRow({
+            id: "phase-6",
+            phase_key: "market_investment",
+            status: "awaiting_approval",
+            output_data: mergedMarketInvestmentOutput,
+          }),
+        ]),
+      ],
+    });
+    const admin = createMockDb({
+      analysis_phases: [
+        row(phaseRow({ id: "phase-7", phase_key: "technical_feasibility", status: "running" })),
+        row(phaseRow({ id: "phase-7", phase_key: "technical_feasibility", status: "awaiting_approval" })),
+      ],
+    });
+    const provider = sequenceProvider([
+      { status: "ok", model: "fake-model", data: validFeasibilityAgentOutput },
+    ]);
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "technical_feasibility",
+      action: "run",
+      aiProvider: provider,
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("blocks Phase 07 when Phase 03 failed", async () => {
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [
+        rows([
+          phaseRow({
+            id: "phase-1",
+            phase_key: "problem_intelligence",
+            status: "approved",
+            output_data: validAnatomy,
+          }),
+          phaseRow({
+            id: "phase-2",
+            phase_key: "stakeholder_pain",
+            status: "approved",
+            output_data: mergedStakeholderPainOutput,
+          }),
+          phaseRow({
+            id: "phase-3",
+            phase_key: "existing_solutions",
+            status: "failed",
+          }),
+          phaseRow({
+            id: "phase-4",
+            phase_key: "gap_intelligence",
+            status: "approved",
+            output_data: mergedGapIntelligenceOutput,
+          }),
+          phaseRow({
+            id: "phase-5",
+            phase_key: "opportunity_innovation",
+            status: "approved",
+            output_data: mergedOpportunityInnovationOutput,
+          }),
+          phaseRow({
+            id: "phase-6",
+            phase_key: "market_investment",
+            status: "approved",
+            output_data: mergedMarketInvestmentOutput,
+          }),
+        ]),
+      ],
+    });
+    const admin = createMockDb({});
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "technical_feasibility",
+      action: "run",
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("conflict");
+      expect(result.message).toMatch(/failed/);
+    }
+  });
+
+  it("runs Phase 07 successfully once Phase 01 through 06 have all cleared their gates", async () => {
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [rows(approvedPhasesThroughMarketInvestment)],
+    });
+    const admin = createMockDb({
+      analysis_phases: [
+        row(phaseRow({ id: "phase-7", phase_key: "technical_feasibility", status: "running" })),
+        row(phaseRow({ id: "phase-7", phase_key: "technical_feasibility", status: "awaiting_approval" })),
+      ],
+    });
+    const provider = sequenceProvider([
+      { status: "ok", model: "fake-model", data: validFeasibilityAgentOutput },
+    ]);
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "technical_feasibility",
+      action: "run",
+      aiProvider: provider,
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data.status).toBe("awaiting_approval");
+    expect(provider.generateStructured).toHaveBeenCalledTimes(1);
+    expect(checkUsageMock).toHaveBeenCalledWith("user-1", "ai");
+    expect(recordUsageMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks Phase 07 failed (not fabricated) when the Feasibility Agent returns invalid_output", async () => {
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [rows(approvedPhasesThroughMarketInvestment)],
+    });
+    const admin = createMockDb({
+      analysis_phases: [
+        row(phaseRow({ id: "phase-7", phase_key: "technical_feasibility", status: "running" })),
+        noRow,
+      ],
+    });
+    const provider = sequenceProvider([
+      { status: "invalid_output", message: "bad json", raw: "{}" },
+    ]);
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "technical_feasibility",
+      action: "run",
+      aiProvider: provider,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("error");
+  });
+
+  it("never spends an AI call once the usage limit is reached", async () => {
+    checkUsageMock.mockResolvedValue({
+      allowed: false,
+      safeMode: true,
+      reason: "Daily ai request limit reached (50/day).",
+      remaining: { daily: 0, monthly: 10 },
+    });
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [rows(approvedPhasesThroughMarketInvestment)],
+    });
+    const admin = createMockDb({});
+    const provider = sequenceProvider([]);
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "technical_feasibility",
+      action: "run",
+      aiProvider: provider,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("unavailable");
+    expect(provider.generateStructured).not.toHaveBeenCalled();
+  });
+
+  it("returns not_found for a session the caller doesn't own", async () => {
+    const supabase = createMockDb({ analysis_sessions: [noRow] });
+    const admin = createMockDb({});
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "missing",
+      phaseKey: "technical_feasibility",
+      action: "run",
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("not_found");
+  });
+
+  it("regenerates an approved Phase 07, archiving history and bumping the version", async () => {
+    const priorOutput = { ...validFeasibilityAgentOutput, criticalBlockersSummary: "NONE_IDENTIFIED", evidenceSummary: { totalSourcesReferenced: 0, verifiedClaimsCount: 0, narrative: "old" } };
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [
+        rows([
+          ...approvedPhasesThroughMarketInvestment,
+          phaseRow({
+            id: "phase-7",
+            phase_key: "technical_feasibility",
+            status: "approved",
+            version: 1,
+            output_data: priorOutput,
+          }),
+        ]),
+      ],
+    });
+    const admin = createMockDb({
+      analysis_phase_history: [noRow],
+      analysis_phases: [
+        row(
+          phaseRow({
+            id: "phase-7",
+            phase_key: "technical_feasibility",
+            status: "running",
+            version: 2,
+          }),
+        ),
+        row(
+          phaseRow({
+            id: "phase-7",
+            phase_key: "technical_feasibility",
+            status: "awaiting_approval",
+            version: 2,
+          }),
+        ),
+      ],
+    });
+    const provider = sequenceProvider([
+      { status: "ok", model: "fake-model", data: validFeasibilityAgentOutput },
+    ]);
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "technical_feasibility",
+      action: "regenerate",
+      aiProvider: provider,
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.data.version).toBe(2);
+  });
+
+  it("regenerating an approved Phase 06 flags an already-approved Phase 07 as needs_regeneration", async () => {
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [
+        rows([
+          ...approvedPhasesThroughOpportunityInnovation,
+          phaseRow({
+            id: "phase-6",
+            phase_key: "market_investment",
+            status: "approved",
+            version: 1,
+            output_data: mergedMarketInvestmentOutput,
+          }),
+          phaseRow({
+            id: "phase-7",
+            phase_key: "technical_feasibility",
+            status: "approved",
+            output_data: { ...validFeasibilityAgentOutput, criticalBlockersSummary: "NONE_IDENTIFIED", evidenceSummary: { totalSourcesReferenced: 0, verifiedClaimsCount: 0, narrative: "old" } },
+          }),
+        ]),
+      ],
+    });
+    const admin = createMockDb({
+      analysis_phase_history: [noRow],
+      analysis_phases: [
+        row(phaseRow({ id: "phase-6", phase_key: "market_investment", status: "running", version: 2 })),
+        row(
+          phaseRow({
+            id: "phase-6",
+            phase_key: "market_investment",
+            status: "awaiting_approval",
+            version: 2,
+            output_data: mergedMarketInvestmentOutput,
+          }),
+        ),
+        noRow, // bulk update marking technical_feasibility needs_regeneration
+      ],
+    });
+    const provider = sequenceProvider([
+      { status: "ok", model: "fake-model", data: validMarketQuestionOutput },
+      { status: "ok", model: "fake-model", data: validMarketAgentOutput },
+      { status: "ok", model: "fake-model", data: validInvestmentAgentOutput },
+    ]);
+    researchSearchMock.mockResolvedValueOnce({
+      status: "ok",
+      provider: "mock",
+      sources: [rawResearchSource],
+    });
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "market_investment",
       action: "regenerate",
       aiProvider: provider,
     });

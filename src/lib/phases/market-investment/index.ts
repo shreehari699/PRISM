@@ -12,6 +12,7 @@ import {
   type Opportunity,
   type OpportunityInnovationAnalysis,
 } from "@/lib/phases/opportunity-innovation/schema";
+import { collectCitedSourceIds } from "@/lib/prism/evidence";
 import { getResearchProvider, type ResearchProvider } from "@/lib/research";
 
 import {
@@ -30,40 +31,15 @@ function invalidOutput<T>(message: string, raw: unknown): AiResult<T> {
 }
 
 /**
- * Walks an arbitrary parsed-output tree and collects every string found
- * under a `sourceIds` array anywhere in it — every claim/marketNumber
- * schema in this phase (and every prior phase) uses that exact field
- * name for citations, so this one generic walk replaces having to
- * enumerate each of the dozens of individual claim/number fields by
- * hand, while still being conservative: it can only ever find MORE
- * citations to validate, never fewer.
- */
-function collectCitedSourceIds(value: unknown, into: Set<string>): void {
-  if (Array.isArray(value)) {
-    for (const item of value) collectCitedSourceIds(item, into);
-    return;
-  }
-  if (value && typeof value === "object") {
-    for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
-      if (key === "sourceIds" && Array.isArray(val)) {
-        for (const id of val) {
-          if (typeof id === "string") into.add(id);
-        }
-      } else {
-        collectCitedSourceIds(val, into);
-      }
-    }
-  }
-}
-
-/**
  * The leading opportunity is Phase 05's own top-ranked opportunity
  * (from `opportunityLandscape`, computed there — never re-derived here)
  * whose refined state isn't `INSUFFICIENT_EVIDENCE`. `null` when Phase 05
  * concluded `NO_MEANINGFUL_OPPORTUNITY`, found nothing at all, or every
- * ranked opportunity is itself insufficient-evidence.
+ * ranked opportunity is itself insufficient-evidence. Exported so Phase 07
+ * (and any later phase) can identify the same "the opportunity" Phase 06
+ * assessed, without re-deriving the selection logic a second time.
  */
-function selectLeadingOpportunity(analysis: OpportunityInnovationAnalysis): Opportunity | null {
+export function selectLeadingOpportunity(analysis: OpportunityInnovationAnalysis): Opportunity | null {
   if (analysis.overallFinding === "NO_MEANINGFUL_OPPORTUNITY" || analysis.opportunities.length === 0) {
     return null;
   }
