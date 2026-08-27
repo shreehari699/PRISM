@@ -1,7 +1,11 @@
+import { DossierReport } from "@/components/investigations/dossier-report";
 import { FeasibilityDashboard } from "@/components/investigations/feasibility-dashboard";
 import { GapIntelligenceView } from "@/components/investigations/gap-intelligence-view";
 import { GenericPhaseOutput } from "@/components/investigations/generic-phase-output";
+import { RedTeamJuryView } from "@/components/investigations/red-team-jury-view";
 import { gapIntelligenceAnalysisSchema } from "@/lib/phases/gap-intelligence/schema";
+import { intelligenceDossierAnalysisSchema } from "@/lib/phases/intelligence-dossier/schema";
+import { pocValidationAnalysisSchema } from "@/lib/phases/poc-validation/schema";
 import { technicalFeasibilityAnalysisSchema } from "@/lib/phases/technical-feasibility/schema";
 import type { PrismPhaseKey } from "@/lib/prism/phases";
 
@@ -23,6 +27,16 @@ export function PhaseOutput({ phaseKey, value }: { phaseKey: PrismPhaseKey; valu
   if (phaseKey === "technical_feasibility") {
     const parsed = technicalFeasibilityAnalysisSchema.safeParse(value);
     if (parsed.success) return <FeasibilityDashboard output={parsed.data} />;
+  }
+
+  if (phaseKey === "poc_validation") {
+    const parsed = pocValidationAnalysisSchema.safeParse(value);
+    if (parsed.success) return <RedTeamJuryView output={parsed.data} />;
+  }
+
+  if (phaseKey === "intelligence_dossier") {
+    const parsed = intelligenceDossierAnalysisSchema.safeParse(value);
+    if (parsed.success) return <DossierReport dossier={parsed.data} />;
   }
 
   return <GenericPhaseOutput value={value} />;
