@@ -152,3 +152,30 @@
     scroll-behavior: auto !important;
   }
 }
+
+dialog {
+  transition:
+    opacity 0.2s ease,
+    display 0.2s ease allow-discrete,
+    overlay 0.2s ease allow-discrete;
+  opacity: 0;
+}
+dialog[open] {
+  opacity: 1;
+}
+dialog::backdrop {
+  transition: opacity 0.2s ease;
+  opacity: 0;
+}
+dialog[open]::backdrop {
+  opacity: 1;
+}
+
+@starting-style {
+  dialog[open] {
+    opacity: 0;
+  }
+  dialog[open]::backdrop {
+    opacity: 0;
+  }
+}

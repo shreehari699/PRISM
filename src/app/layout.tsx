@@ -1,5 +1,9 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+
+import { ThemeScript } from "@/components/theme-script";
+import { VoiceConsultantProvider } from "@/lib/voice/voice-context";
+
 import "./globals.css";
 
 const geistSans = Geist({
@@ -15,18 +19,21 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "PRISM — Problem Research & Intelligence Strategy Matrix",
   description:
-    "A Zero Degree product. Don't build the first solution. Understand the problem first.",
+    "Turn a problem statement into an evidence-backed build decision. A Zero Degree product.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} dark h-full antialiased`}
       suppressHydrationWarning
     >
-      <body className="min-h-full flex flex-col bg-background text-foreground">
-        {children}
+      <head>
+        <ThemeScript />
+      </head>
+      <body className="flex min-h-full flex-col bg-background text-foreground">
+        <VoiceConsultantProvider>{children}</VoiceConsultantProvider>
       </body>
     </html>
   );
