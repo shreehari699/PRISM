@@ -15,6 +15,10 @@ import {
   gapIntelligenceAnalysisSchema,
 } from "@/lib/phases/gap-intelligence";
 import {
+  runIntelligenceDossierPhase,
+  intelligenceDossierAnalysisSchema,
+} from "@/lib/phases/intelligence-dossier";
+import {
   runMarketInvestmentPhase,
   marketInvestmentAnalysisSchema,
 } from "@/lib/phases/market-investment";
@@ -94,6 +98,10 @@ const registry: Partial<Record<PrismPhaseKey, PhaseExecutor>> = {
   poc_validation: {
     schema: pocValidationAnalysisSchema,
     execute: (context, provider) => runPocValidationPhase(context, provider),
+  },
+  intelligence_dossier: {
+    schema: intelligenceDossierAnalysisSchema,
+    execute: (context, provider) => runIntelligenceDossierPhase(context, provider),
   },
 };
 

@@ -140,7 +140,7 @@ export const AGENTS: readonly AgentDefinition[] = [
     name: "Jury Agent",
     phase: "intelligence_dossier",
     responsibility:
-      "Evaluates the full investigation as an impartial judge and drafts the final decision.",
+      "Superseded in this implementation by Phase 09's Validation Agent, which already runs the full red-team and five-perspective jury review — Phase 10 reuses that output directly rather than re-simulating it.",
     usesResearch: false,
   },
   {
@@ -148,7 +148,7 @@ export const AGENTS: readonly AgentDefinition[] = [
     name: "Report Generator",
     phase: "intelligence_dossier",
     responsibility:
-      "Assembles the PRISM Intelligence Dossier from validated phase data only.",
+      "Synthesizes Phases 01-09's own structured output into the PRISM Intelligence Dossier — never re-authoring a fact, only narrative synthesis and validated selections of real upstream ids.",
     usesResearch: false,
   },
 ] as const;

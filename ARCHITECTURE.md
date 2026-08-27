@@ -60,13 +60,16 @@ holds:
   Agent, Existing Solution Agent, Gap Agent, Opportunity Agent,
   Innovation Agent, Market Agent, Investment Agent, Feasibility Agent,
   Solution Consultant, Validation Agent, Jury Agent, Report Generator),
-  each mapped to the phase it belongs to. The first thirteen of these
-  are implemented (see §2a/§2b/§2c/§2d/§2e/§2f/§2g/§2h/§2i). Phase 06's
-  Market Agent internally depends on a Market Research Agent component
-  (`src/lib/agents/market-research-agent/`) the same way Phase 03's
-  named Research Agent internally splits into a question-generator and
-  an executor — an implementation detail under the one named
-  `market_agent` slot, not a 16th roster entry.
+  each mapped to the phase it belongs to. Fourteen of these are
+  implemented (see §2a through §2j) — the Jury Agent is the deliberate
+  exception: Phase 09's Validation Agent already runs the full red-team
+  and five-perspective jury review, so Phase 10 reuses that output
+  directly instead of running a second jury simulation (see §2j).
+  Phase 06's Market Agent internally depends on a Market Research Agent
+  component (`src/lib/agents/market-research-agent/`) the same way
+  Phase 03's named Research Agent internally splits into a
+  question-generator and an executor — an implementation detail under
+  the one named `market_agent` slot, not a 16th roster entry.
 - **`orchestrator.ts`** (`PrismOrchestrator`) — pure sequencing logic
   with no AI or database calls of its own:
   - `getActivePhase()` — which phase the project is currently on
@@ -80,14 +83,8 @@ holds:
     project mode, that mode's evaluation criteria, the problem
     statement, and every upstream phase's output
 
-**(planned)** The per-phase system instructions, prompts, and Zod output
-schemas for the 2 agents beyond the Problem Analyst, Stakeholder
-Analyst, Pain Analyst, Research Agent, Existing Solution Agent, Gap
-Agent, Opportunity Agent, Innovation Agent, Market Agent, Investment
-Agent, Feasibility Agent, Solution Consultant, and Validation Agent
-(see §2a/§2b/§2c/§2d/§2e/§2f/§2g/§2h/§2i) — this foundation establishes
-where they plug in (`AiProvider.generateStructured` via the phase
-registry), not their content.
+All ten PRISM phases are implemented on this foundation — nothing
+remains planned at the orchestration layer.
 
 ### 2a. Phase engine and Phase 01 — Problem Intelligence (reference implementation)
 
@@ -942,11 +939,106 @@ implementation, one at a time.
 - **Registered** in `src/lib/phases/registry.ts` exactly like the prior
   phases — no new API routes, no route changes.
 
-Phase 10 extends this the same way: add an entry to the agent registry,
-and where a phase needs more than one agent (Phase 10 itself calls both
-the Jury Agent and the Report Generator), have that phase's `execute`
-internally call each and merge their output — the phase engine only
-ever sees one `AiResult`.
+### 2j. Phase 10 — Final Intelligence Dossier & Decision Synthesis
+
+A single agent — the Report Generator, per the phase catalog's own
+`agents: ["jury_agent", "report_generator"]` roster, of which only
+`report_generator` is actually invoked (see the Jury Agent note in §2
+above) — no new Tavily research of its own. This is the last phase:
+PRISM has investigated the problem through nine intelligence layers,
+and Phase 10's only job is to synthesize what was already found into
+one authoritative dossier. It must not simply concatenate the previous
+phases' JSON, and it must not introduce a single new factual claim.
+
+- **The model narrates and selects; the composer assembles the facts.**
+  This is the load-bearing design decision of the whole phase.
+  `src/lib/agents/report-generator/` supplies only narrative synthesis
+  (the executive summary, section-by-section prose) and, where a
+  section needs one, a *selection* of a real upstream id — the most
+  important gap, which pains/solutions to feature, which of Phase 09's
+  red-team points and jury questions are the hardest. It never
+  re-authors a stakeholder list, a market number, a feasibility
+  dimension, or the jury panel itself — `src/lib/phases/intelligence-dossier/`
+  copies or filters every one of those directly from Phases 01–09's own
+  structured output. This is what makes "no hallucinated summary" true
+  by construction rather than by prompt request alone.
+  - Stakeholder tiers and roles (`primaryStakeholders`/`users`/`buyers`/
+    `beneficiaries`/`decisionMakers`, etc.) are filtered straight from
+    Phase 02's real `category`/`roles` fields — "do not invent
+    stakeholder roles" enforced mechanically, not just requested.
+  - Every model-selected id (`mostImportantGapId`, `importantPainLocalIds`,
+    `importantSolutionLocalIds`, the red-team selection, `topJuryQuestionIds`,
+    and every `decisionTrace` stage's `criticalEvidence`) is resolved
+    against the real Phase 01–09 output the composer holds and rejected
+    as `invalid_output` if it doesn't exist — the same "select, don't
+    invent" discipline Phase 08/09 already established for their own
+    critical-assumption and mode-plan selections.
+  - TAM/SAM/SOM and every other market figure are Phase 06's own
+    `marketNumber` objects, copied unchanged — "do not manufacture
+    market numbers" is structurally impossible to violate here, since
+    the dossier never lets the model touch a number at all.
+- **Jury Agent superseded, not duplicated**: Phase 09's Validation
+  Agent already ran the full red-team critique and five-perspective
+  jury review. Re-running a second jury simulation here would be
+  exactly the "duplicate previous phase logic" this phase is forbidden
+  from doing, so `jurySummary` reuses Phase 09's own jury panel and
+  `redTeamSummary`/`topJuryQuestions` resolve the model's selections
+  against Phase 09's real points and questions.
+- **Deterministic final decision** (`finalVerdict.decision`: BUILD /
+  BUILD_WITH_CHANGES / VALIDATE_BEFORE_BUILD / RESEARCH_BEFORE_BUILD /
+  DO_NOT_BUILD / INSUFFICIENT_EVIDENCE) — computed by the composer,
+  never taken from the model's own `buildRecommendation` unmodified:
+  1. No Phase 08 solution → DO_NOT_BUILD if Phase 08's own reality
+     check was NOT_RECOMMENDED, otherwise INSUFFICIENT_EVIDENCE.
+  2. Phase 07 overall feasibility INFEASIBLE → DO_NOT_BUILD (an
+     explicit, redundant re-assertion of Phase 09's own identical rule
+     — defense in depth, since the spec calls this case out by name).
+  3. Phase 09's own `finalValidationDecision` is INSUFFICIENT_EVIDENCE,
+     or the model's own `buildRecommendation` is INSUFFICIENT_EVIDENCE
+     → INSUFFICIENT_EVIDENCE.
+  4. Otherwise, Phase 09's decision and the model's own recommendation
+     are each placed on the same four-step ladder (BUILD ⇒
+     BUILD_WITH_CHANGES ⇒ VALIDATE_BEFORE_BUILD/RESEARCH_BEFORE_BUILD ⇒
+     DO_NOT_BUILD) and the *worse* of the two wins — the model can
+     independently be more pessimistic than Phase 09's own decision
+     (PRISM must be comfortable concluding "this is a bad idea"), but
+     can never be more optimistic than what Phase 09 already earned.
+     `RESEARCH_BEFORE_BUILD` is the same severity as
+     `VALIDATE_BEFORE_BUILD`, surfaced under that name specifically
+     when `context.mode` is RESEARCH.
+- **Contradiction safeguards** (on top of each phase's own composer,
+  defense in depth): a recommended solution grounded in a Phase 04 gap
+  that is `NO_GAP_ESTABLISHED` is rejected; an `AI_NOT_REQUIRED`
+  solution carrying a non-null `aiArchitecture` is rejected; at most
+  five of the twenty sections may be marked `CRITICAL` (rejecting an
+  agent that arbitrarily calls everything critical); `overallConfidence`
+  cannot stay `HIGH` once a Phase 09 validation claim is `CONTRADICTED`
+  or the model's own recommendation is `INSUFFICIENT_EVIDENCE`.
+- **Evidence summary, computed from structured data, not model text**:
+  `verifiedClaims` sums each prior phase's own already-computed
+  verified-count fields (never re-derived by a blind tree walk, which
+  would false-positive against unrelated status enums like
+  `deploymentStatus` or `scalabilityLevel` that happen to share literal
+  values such as `"UNKNOWN"`); `inferences`/`assumptions`/`unknowns`/
+  `contradictions` are scoped to Phase 09's own adversarial
+  `validationClaims` and assumption register — the one place in the
+  pipeline with a reliably-typed, six-way evidence vocabulary;
+  `sourcesUsed` is the real intersection of every cited `sourceIds`
+  entry (via the shared `collectCitedSourceIds` walk) against Phase 06's
+  actual source list. `overallConfidence` is Phase 09's own
+  `confidenceSummary.overallConfidence` — the most rigorous
+  evidence-quality pass in the pipeline — with one honesty floor
+  applied, never a model-confidence average.
+- **Dependency on Phase 01, 02, 04, 05, 07, 08, AND 09**: enforced
+  entirely by the existing, unmodified `PrismOrchestrator.canEnterPhase`
+  — no Phase-10-specific gating logic. As with every prior phase, both
+  `existing_solutions` (Phase 03) and `market_investment` (Phase 06)
+  only have to have run, not be explicitly approved.
+- **Persistence**: `analysis_phases.output_data` (jsonb), same pattern
+  as Phases 01–09. No new tables.
+- **Registered** in `src/lib/phases/registry.ts` exactly like the prior
+  phases — no new API routes, no route changes. `intelligence_dossier`
+  is the last phase in the catalog (order 10); there is no Phase 11.
 
 ## 3. AI provider abstraction
 
@@ -1088,25 +1180,25 @@ Per the scope of this foundation pass, the following are intentionally
   session — but no login page exists yet, so there's currently no way to
   obtain one through the UI)
 - Any investigation UI (problem input form, phase review/approval
-  screens, dossier view, stakeholder/pain relationship graph, existing-
-  solution comparison view, gap coverage matrix view, opportunity
-  landscape/ranking view, market/TAM-SAM-SOM/investment view,
-  feasibility/risk-register/roadmap view, solution architecture/data-flow
-  diagram view, validation/red-team/jury-review view) — Phases 01–09
-  exist as tested API + service layer only; see
-  §2a/§2b/§2c/§2d/§2e/§2f/§2g/§2h/§2i. The stakeholder/pain data model is
-  built to support a future network-graph view (`painPointIds` on each
-  stakeholder), but no visual graph exists. Phase 08's `architecture` and
-  `dataFlow` fields are likewise structured data waiting on a future
-  diagram renderer, not an image.
-- Phase 10's agents, schemas, and prompts (the registry and engine they
-  plug into are done — see §2a/§2b/§2c/§2d/§2e/§2f/§2g/§2h/§2i)
+  screens, the final dossier view itself, stakeholder/pain relationship
+  graph, existing-solution comparison view, gap coverage matrix view,
+  opportunity landscape/ranking view, market/TAM-SAM-SOM/investment
+  view, feasibility/risk-register/roadmap view, solution
+  architecture/data-flow diagram view, validation/red-team/jury-review
+  view) — all ten phases exist as a tested API + service layer only;
+  see §2a through §2j. The stakeholder/pain data model is built to
+  support a future network-graph view (`painPointIds` on each
+  stakeholder), but no visual graph exists. Phase 08's `architecture`
+  and `dataFlow` fields, and Phase 10's `decisionTrace` and
+  `sectionManifest`, are likewise structured data waiting on future
+  diagram/report renderers (web report, PDF, presentation, summary
+  card — see §2j), not images or documents generated yet.
 - Populating the normalized `stakeholders` / `pain_points` /
   `research_sources` tables from Phase 02/03 output (currently
-  jsonb-only — see §2b/§2c). Phases 04, 05, 06, 07, 08, and 09 have no
+  jsonb-only — see §2b/§2c). Phases 04 through 10 have no
   normalized-table counterpart in the existing schema at all — their
   output lives in `analysis_phases.output_data` only, by design (see
-  §2d/§2e/§2f/§2g/§2h/§2i).
+  §2d through §2j).
 - PDF upload handling for the `pdf_upload` input method (the schema and
   `source_file_url` column exist; nothing populates or reads a file yet)
 - The voice consultant and cinematic opening experience
