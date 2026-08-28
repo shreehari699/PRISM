@@ -1,5 +1,6 @@
 import { DetailsSection } from "@/components/investigations/details-section";
 import { GenericPhaseOutput } from "@/components/investigations/generic-phase-output";
+import { PhaseExecutiveSummary } from "@/components/investigations/phase-executive-summary";
 import { ScoreBar } from "@/components/investigations/score-bar";
 import { StatusChip } from "@/components/investigations/status-chip";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -13,6 +14,29 @@ export function StakeholderPainView({ output }: { output: StakeholderPainAnalysi
 
   return (
     <div className="flex flex-col gap-6">
+      <PhaseExecutiveSummary
+        headline={
+          primaryPainPoint
+            ? `Primary pain: ${primaryPainPoint.painTitle}`
+            : "No primary pain point was established."
+        }
+        stats={[
+          { label: "Stakeholders", value: output.stakeholders.length },
+          { label: "Pain points", value: output.painPoints.length },
+          { label: "Secondary pains", value: output.secondaryPains.length },
+        ]}
+        confidence={
+          <>
+            <StatusChip status={output.realityCheck.stakeholderConfidence} />
+            <StatusChip status={output.realityCheck.painConfidence} />
+            <StatusChip status={output.realityCheck.primaryPainConfidence} />
+          </>
+        }
+        uncertainty={
+          output.realityCheck.evidenceCompleteness !== "STRONG" ? output.realityCheck.summary : undefined
+        }
+      />
+
       <div>
         <p className="mb-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">
           Stakeholders ({output.stakeholders.length})

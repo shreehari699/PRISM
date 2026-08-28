@@ -1,5 +1,6 @@
 import { DetailsSection } from "@/components/investigations/details-section";
 import { GenericPhaseOutput } from "@/components/investigations/generic-phase-output";
+import { PhaseExecutiveSummary } from "@/components/investigations/phase-executive-summary";
 import { StatusChip } from "@/components/investigations/status-chip";
 import { Badge } from "@/components/ui/badge";
 import type { ExistingSolutionsAnalysis } from "@/lib/phases/existing-solutions/schema";
@@ -18,6 +19,21 @@ const COVERAGE_LABELS: Record<keyof ExistingSolutionsAnalysis["researchCoverage"
 export function ExistingSolutionsView({ output }: { output: ExistingSolutionsAnalysis }) {
   return (
     <div className="flex flex-col gap-6">
+      <PhaseExecutiveSummary
+        headline={
+          output.solutions.length === 0
+            ? "No credible existing solution was found addressing this problem."
+            : `${output.solutions.length} existing solution${output.solutions.length === 1 ? "" : "s"} found, drawing on ${output.stats.sourcesUsed} of ${output.stats.sourcesFound} sources.`
+        }
+        stats={[
+          { label: "Sources found", value: output.stats.sourcesFound },
+          { label: "Sources used", value: output.stats.sourcesUsed },
+          { label: "Queries executed", value: output.stats.queriesExecuted },
+          { label: "Research failures", value: output.stats.researchFailures },
+        ]}
+        uncertainty={output.stats.budgetExhausted ? "Research budget was exhausted this run." : undefined}
+      />
+
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         {Object.entries(output.stats).map(([key, value]) => (
           <div key={key} className="rounded-md border border-border p-3 text-center">

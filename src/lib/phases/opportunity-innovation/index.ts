@@ -130,7 +130,12 @@ export async function runOpportunityInnovationPhase(
     }
   }
 
-  const innovationResult = await runInnovationAgent(context, draftOpportunities, provider);
+  const innovationResult = await runInnovationAgent(
+    context,
+    draftOpportunities,
+    existingSolutions.data.sources,
+    provider,
+  );
   if (innovationResult.status !== "ok") {
     return innovationResult;
   }

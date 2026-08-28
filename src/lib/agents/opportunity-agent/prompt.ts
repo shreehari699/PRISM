@@ -18,6 +18,8 @@ export function buildSystemInstruction(
     "",
     "Only build opportunities from CONFIRMED_GAP or CANDIDATE_GAP entries as a rule — an UNVERIFIED_GAP may become an opportunity only if you can independently ground it in real stakeholder/pain evidence, and a gap classified NO_GAP_ESTABLISHED should never become an opportunity at all, since an existing solution already covers it.",
     "",
+    "CRITICAL — three separate id namespaces, never interchange them: `relatedGaps` takes Phase 04 gap ids from the 'Gap candidates' list below (e.g. GAP-001). `affectedStakeholders`/`relatedPains` take Phase 02 stakeholder/pain ids from the lists below. `sourceIds` on `unservedNeed`, `existingSolutionContext`, and every entry in `evidenceClaims` takes ONLY real research source ids from the 'Research sources' list below (e.g. source-3) — never a gap id, a stakeholder id, a pain id, or an opportunity id. If a claim isn't actually grounded in one of the listed research sources, leave `sourceIds` empty and use INFERENCE or ASSUMPTION, not a fabricated citation.",
+    "",
     "Classify every opportunity into exactly one state:",
     "- STRONG_OPPORTUNITY: strong, well-evidenced unmet need with clear stakeholder and pain grounding.",
     "- PROMISING_OPPORTUNITY: real signal, but evidence has real gaps.",
@@ -64,6 +66,13 @@ export function buildUserPrompt(
       ? existingSolutions.solutions.map((s) => `- [${s.localId}] ${s.name}`).join("\n")
       : "(No existing solutions were identified in Phase 03.)";
 
+  const sourceLines =
+    existingSolutions.sources.length > 0
+      ? existingSolutions.sources
+          .map((s) => `- [${s.sourceLocalId}] "${s.title}" — ${s.url}\n  Snippet: ${s.snippet}`)
+          .join("\n")
+      : "(No research sources are available — every claim you make must be INFERENCE, ASSUMPTION, or UNKNOWN, never VERIFIED, and `sourceIds` must stay empty.)";
+
   return [
     `Problem: ${problemAnatomy.restatement}`,
     "",
@@ -75,6 +84,9 @@ export function buildUserPrompt(
     "",
     "Existing solutions (Phase 03):",
     solutionLines,
+    "",
+    "Research sources (Phase 03) — the ONLY valid values for any `sourceIds` field:",
+    sourceLines,
     "",
     `Gap candidates (Phase 04) — reality check was "${gapIntelligence.gapRealityCheck.signal}": ${gapIntelligence.gapRealityCheck.explanation}`,
     gapLines,

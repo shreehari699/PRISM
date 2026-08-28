@@ -20,6 +20,47 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** True for any `{claim, status, ...}`-shaped evidence claim, regardless of which phase produced it — the one repeated shape across every PRISM schema. */
+function isEvidenceClaimShaped(
+  value: Record<string, unknown>,
+): value is { claim: string; status: string; reasoning?: string; confidence?: string; sourceIds?: string[] } {
+  return (
+    typeof value.claim === "string" &&
+    typeof value.status === "string" &&
+    EVIDENCE_LIKE.has(value.status.toUpperCase())
+  );
+}
+
+/**
+ * A compact single block for one evidence claim — status badge, the
+ * claim itself, and "Why?" reasoning, instead of stacking "Claim",
+ * "Status", "Reasoning", "Confidence", and "Source Ids" as five separate
+ * repeated dt/dd label rows for what is functionally one statement.
+ */
+function EvidenceClaimCompact({
+  value,
+}: {
+  value: { claim: string; status: string; reasoning?: string; confidence?: string; sourceIds?: string[] };
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex flex-wrap items-center gap-2">
+        <EvidenceBadge status={value.status} />
+        {value.confidence ? (
+          <span className="text-xs text-muted-foreground">{value.confidence} confidence</span>
+        ) : null}
+      </div>
+      <p className="text-sm leading-6">{value.claim}</p>
+      {value.reasoning ? (
+        <p className="text-xs text-muted-foreground">Why? {value.reasoning}</p>
+      ) : null}
+      {value.sourceIds && value.sourceIds.length > 0 ? (
+        <p className="text-xs text-muted-foreground">Sources: {value.sourceIds.join(", ")}</p>
+      ) : null}
+    </div>
+  );
+}
+
 /**
  * A schema-agnostic renderer for phase `outputData`. Every PRISM phase
  * persists a different Zod shape, so rather than hand-write ten bespoke
@@ -72,6 +113,8 @@ export function GenericPhaseOutput({ value, depth = 0 }: { value: unknown; depth
   }
 
   if (isPlainObject(value)) {
+    if (isEvidenceClaimShaped(value)) return <EvidenceClaimCompact value={value} />;
+
     const entries = Object.entries(value);
     if (entries.length === 0) return <p className="text-sm text-muted-foreground">None.</p>;
 

@@ -1,14 +1,33 @@
 import { DetailsSection } from "@/components/investigations/details-section";
 import { GapFlowDiagram } from "@/components/investigations/gap-flow-diagram";
 import { GenericPhaseOutput } from "@/components/investigations/generic-phase-output";
+import { PhaseExecutiveSummary } from "@/components/investigations/phase-executive-summary";
 import { StatusChip } from "@/components/investigations/status-chip";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import type { GapIntelligenceAnalysis } from "@/lib/phases/gap-intelligence/schema";
 
 export function GapIntelligenceView({ output }: { output: GapIntelligenceAnalysis }) {
+  const totalRealGaps = output.confirmedGaps.length + output.candidateGaps.length;
+
   return (
     <div className="flex flex-col gap-6">
+      <PhaseExecutiveSummary
+        headline={
+          totalRealGaps === 0
+            ? "No confirmed or candidate gap was established — every evaluated candidate is already covered."
+            : `${output.confirmedGaps.length} confirmed and ${output.candidateGaps.length} candidate gap${totalRealGaps === 1 ? "" : "s"} identified.`
+        }
+        stats={[
+          { label: "Confirmed", value: output.confirmedGaps.length },
+          { label: "Candidate", value: output.candidateGaps.length },
+          { label: "Unverified", value: output.unverifiedGaps.length },
+          { label: "Already covered", value: output.noGapFindings.length },
+        ]}
+        confidence={<StatusChip status={output.confidenceSummary.overallConfidence} />}
+        uncertainty={output.validationQuestions[0]}
+      />
+
       <div className="flex flex-wrap gap-3">
         <Badge variant="destructive">{output.confirmedGaps.length} confirmed</Badge>
         <Badge variant="assumption">{output.candidateGaps.length} candidate</Badge>

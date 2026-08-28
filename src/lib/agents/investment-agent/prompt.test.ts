@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import type { MarketEvidenceSourceInput } from "@/lib/agents/market-agent/prompt";
 import type { MarketAgentOutput } from "@/lib/agents/market-agent/schema";
 import type { Opportunity } from "@/lib/phases/opportunity-innovation/schema";
 
@@ -96,6 +97,16 @@ const leadingOpportunity: Opportunity = {
   validationQuestions: [],
 };
 
+const sources: MarketEvidenceSourceInput[] = [
+  {
+    sourceLocalId: "source-1",
+    title: "eNAM",
+    url: "https://enam.gov.in",
+    snippet: "A national e-market platform for agricultural commodities.",
+    origin: "existing_solutions_reused",
+  },
+];
+
 describe("buildSystemInstruction (Investment Agent)", () => {
   it("forbids manufacturing a positive investment case", () => {
     const instruction = buildSystemInstruction("STARTUP", ["market"]);
@@ -107,17 +118,38 @@ describe("buildSystemInstruction (Investment Agent)", () => {
     expect(instruction).toMatch(/NEVER state an exact valuation as fact/);
     expect(instruction).toMatch(/ILLUSTRATIVE_MODEL_ESTIMATE/);
   });
+
+  // Latent instance of the Phase 05 GAP-001 bug class: `sourceIds` on a
+  // calculation input is validated against real evidence source ids by
+  // the composer, but this agent's prompt never told the model that
+  // explicitly and never showed it the real list.
+  it("forbids citing a non-evidence id in a calculation input's sourceIds", () => {
+    const instruction = buildSystemInstruction("HACKATHON", ["demo_feasibility"]);
+    expect(instruction).toMatch(/never a gap id, opportunity id, or any other id from a different phase/i);
+  });
 });
 
 describe("buildUserPrompt (Investment Agent)", () => {
   it("embeds the market analysis summary and TAM/SAM/SOM", () => {
-    const prompt = buildUserPrompt("Farmers lack pricing.", leadingOpportunity, marketAnalysis);
+    const prompt = buildUserPrompt("Farmers lack pricing.", leadingOpportunity, marketAnalysis, sources);
     expect(prompt).toContain("district-level price transparency");
     expect(prompt).toContain("EARLY_MARKET");
   });
 
   it("notes when there is no leading opportunity", () => {
-    const prompt = buildUserPrompt("Farmers lack pricing.", null, marketAnalysis);
+    const prompt = buildUserPrompt("Farmers lack pricing.", null, marketAnalysis, sources);
     expect(prompt).toMatch(/did not identify a meaningful opportunity/i);
+  });
+
+  it("shows the real evidence source ids so the model has something valid to cite in sourceIds", () => {
+    const prompt = buildUserPrompt("Farmers lack pricing.", leadingOpportunity, marketAnalysis, sources);
+    expect(prompt).toContain("[source-1]");
+    expect(prompt).toMatch(/evidence sources[\s\S]*only valid values for any `sourceIds`/i);
+  });
+
+  it("tells the model explicitly when no sources exist, rather than leaving it to guess", () => {
+    const prompt = buildUserPrompt("Farmers lack pricing.", leadingOpportunity, marketAnalysis, []);
+    expect(prompt).toMatch(/no evidence sources are available/i);
+    expect(prompt).toMatch(/sourceIds[\s\S]*must stay empty/i);
   });
 });

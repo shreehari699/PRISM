@@ -1,3 +1,4 @@
+import type { MarketEvidenceSourceInput } from "@/lib/agents/market-agent/prompt";
 import type { MarketAgentOutput } from "@/lib/agents/market-agent/schema";
 import type { Opportunity } from "@/lib/phases/opportunity-innovation/schema";
 import { MODE_LABELS, type ProjectMode } from "@/lib/prism/modes";
@@ -18,6 +19,8 @@ export function buildSystemInstruction(
     "",
     "VALUATION: you must NEVER state an exact valuation as fact (e.g. 'this startup is worth ₹50 crore'). You may name valuation drivers (revenue potential, market size, growth, recurring revenue, technology defensibility, competition, capital intensity, regulatory risk, traction requirements) with a qualitative assessment each. If — and only if — a concrete scenario is genuinely useful to illustrate, provide it as an `illustrativeScenario` explicitly labeled ILLUSTRATIVE_MODEL_ESTIMATE with its full calculation shown (inputs, formula, assumptions) — never as a verified figure. If there isn't enough basis even for an illustration, set it to UNKNOWN (null).",
     "",
+    "CRITICAL — if any calculation input in `illustrativeScenario` cites a `sourceIds` value, it must be a real evidence source id from the 'Evidence sources' list below — never a gap id, opportunity id, or any other id from a different phase. If nothing in that list supports an input, leave `sourceIds` empty for it rather than fabricating a citation.",
+    "",
     "INVESTMENT REALITY CHECK: conclude with one dynamically-explained signal — STRONG_INVESTMENT_CASE, PROMISING_INVESTMENT_CASE, BOOTSTRAP_FIRST, RESEARCH_BEFORE_INVESTMENT, WEAK_INVESTMENT_CASE, or INSUFFICIENT_EVIDENCE — grounded in the actual market analysis you were given, never boilerplate.",
     "",
     "You also produce the final confidenceSummary for this whole phase (STRONG/MODERATE/WEAK/INSUFFICIENT_EVIDENCE with a narrative) — weigh both the market and investment evidence you've now seen, not just your own half.",
@@ -32,10 +35,16 @@ export function buildUserPrompt(
   problemStatement: string,
   leadingOpportunity: Opportunity | null,
   marketAnalysis: MarketAgentOutput,
+  sources: MarketEvidenceSourceInput[],
 ): string {
   const tam = marketAnalysis.tamAnalysis.value;
   const sam = marketAnalysis.samAnalysis.value;
   const som = marketAnalysis.somAnalysis.value;
+
+  const sourceLines =
+    sources.length > 0
+      ? sources.map((s) => `- [${s.sourceLocalId}] "${s.title}" — ${s.url}`).join("\n")
+      : "(No evidence sources are available — any `sourceIds` field must stay empty.)";
 
   return [
     `Problem: ${problemStatement}`,
@@ -54,6 +63,9 @@ export function buildUserPrompt(
     marketAnalysis.businessModels.length > 0
       ? `Business models proposed: ${marketAnalysis.businessModels.map((m) => m.model).join(", ")}`
       : "No business model was proposed.",
+    "",
+    "Evidence sources (Phase 03/06) — the ONLY valid values for any `sourceIds` field:",
+    sourceLines,
     "",
     "Produce the investment analysis, valuation drivers, and investment reality check for this opportunity, grounded strictly in the market analysis above.",
   ].join("\n");

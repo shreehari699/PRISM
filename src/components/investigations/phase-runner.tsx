@@ -1,8 +1,9 @@
 "use client";
 
-import { AlertCircle, Check, Lock, RotateCcw, Sparkles } from "lucide-react";
+import { Check, Lock, RotateCcw, Sparkles } from "lucide-react";
 
 import { InvestigatingIndicator } from "@/components/investigations/investigating-indicator";
+import { PhaseErrorAlert } from "@/components/investigations/phase-error-alert";
 import { PhaseOutput } from "@/components/investigations/phase-output";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -63,11 +64,7 @@ export function PhaseRunner({
 
       {uiState === "failed" ? (
         <>
-          <Alert variant="destructive">
-            <AlertCircle />
-            <AlertTitle>This phase failed</AlertTitle>
-            <AlertDescription>{dto.errorMessage ?? "An unknown error occurred."}</AlertDescription>
-          </Alert>
+          <PhaseErrorAlert message={dto.errorMessage} />
           <div>
             <Button variant="prism" onClick={onRun} disabled={pending}>
               Retry

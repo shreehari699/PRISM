@@ -21,6 +21,18 @@ export function phaseTransitionDialogue(phaseOrder: number, phaseTitle: string):
   return `Phase ${String(phaseOrder).padStart(2, "0")}: ${phaseTitle}. Let's look closer.`;
 }
 
+/** Spoken once, the first time a given phase is opened this session — what PRISM is about to do, from that phase's own real description. */
+export function phaseOpenDialogue(phaseTitle: string, phaseDescription: string): string {
+  return `${phaseTitle}. ${phaseDescription}`;
+}
+
+/** Spoken when a phase run/regenerate finishes — `findings` is a real, dynamic sentence built from that phase's own actual output, never a fixed line. */
+export function phaseCompleteDialogue(phaseTitle: string, findings: string | null): string {
+  return findings
+    ? `${phaseTitle} is complete. ${findings}`
+    : `${phaseTitle} is complete and ready for your review.`;
+}
+
 export function discoveryDialogue(headline: string, detail?: string): string {
   return detail ? `Here's what I found: ${headline}. ${detail}` : `Here's what I found: ${headline}.`;
 }

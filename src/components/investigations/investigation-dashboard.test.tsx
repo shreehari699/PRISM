@@ -151,6 +151,100 @@ describe("InvestigationDashboard: phase action timeout safety", () => {
   });
 });
 
+describe("InvestigationDashboard: phase failure errors are humanized, not shown raw", () => {
+  it("never shows the raw composer validation text as the primary message — it's tucked under Technical details", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      json: async () => ({
+        error: 'Opportunity "OPP-001" has a claim citing unknown source "GAP-001".',
+      }),
+    }) as unknown as typeof fetch;
+
+    renderDashboard();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /run this phase/i }));
+    });
+
+    const alert = screen.getByRole("alert");
+    // The friendly headline/explanation is the visible primary text.
+    expect(alert).toHaveTextContent(/couldn't be completed/i);
+    expect(alert).toHaveTextContent(/no unsupported conclusion was accepted/i);
+    // The raw technical string is still present (never discarded) but only
+    // inside the collapsed <details> — not surfaced as the main message.
+    expect(screen.getByText(/technical details/i)).toBeInTheDocument();
+    expect(alert).toHaveTextContent(/GAP-001/);
+  });
+});
+
+describe("InvestigationDashboard: phase-open narration follows real navigation", () => {
+  it("narrates a phase's own real title and description the first time it's opened via the stepper", () => {
+    renderDashboard();
+    speakMock.mockClear(); // drop the welcome call from mount
+
+    fireEvent.click(screen.getByRole("button", { name: /stakeholders/i }));
+
+    expect(speakMock).toHaveBeenCalledTimes(1);
+    expect(speakMock).toHaveBeenCalledWith(
+      expect.stringContaining("Stakeholder & Pain Analysis"),
+    );
+    expect(speakMock).toHaveBeenCalledWith(
+      expect.stringContaining("Identify every stakeholder group"),
+    );
+  });
+
+  it("does not replay a phase's open narration on re-selecting the same phase", () => {
+    renderDashboard();
+    fireEvent.click(screen.getByRole("button", { name: /stakeholders/i }));
+    speakMock.mockClear();
+
+    fireEvent.click(screen.getByRole("button", { name: /stakeholders/i }));
+
+    expect(speakMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("InvestigationDashboard: phase-complete narration reflects real findings", () => {
+  it("narrates a real finding pulled from the actual output, not a fixed line, when a run succeeds", async () => {
+    const validAnatomy = {
+      restatement: "Farmers lack real-time crop pricing.",
+      who: [{ group: "Farmers", description: "Affected group" }],
+      what: { claim: "x", status: "INFERENCE", reasoning: "y" },
+      where: { claim: "x", status: "INFERENCE", reasoning: "y" },
+      when: { claim: "x", status: "INFERENCE", reasoning: "y" },
+      why: [{ claim: "x", status: "ASSUMPTION", reasoning: "y" }],
+      assumptions: [{ claim: "x", status: "ASSUMPTION", reasoning: "y" }],
+      openQuestions: ["Does offline mode matter?"],
+      clarity: { isWellDefined: true, issues: [] },
+      problemScore: { value: 50, basis: "ai_estimate", reasoning: "n/a", confidence: "low" },
+    };
+    const updated: PhaseStateDTO = {
+      phaseKey: "problem_intelligence",
+      status: "awaiting_approval",
+      version: 1,
+      outputData: validAnatomy,
+      errorMessage: null,
+      approvedAt: null,
+      updatedAt: now,
+    };
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => updated,
+    }) as unknown as typeof fetch;
+
+    renderDashboard();
+    speakMock.mockClear();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /run this phase/i }));
+    });
+
+    expect(speakMock).toHaveBeenCalledWith(expect.stringContaining("Problem Intelligence is complete"));
+    expect(speakMock).toHaveBeenCalledWith(expect.stringContaining("1 affected group"));
+    expect(speakMock).toHaveBeenCalledWith(expect.stringContaining("1 open question"));
+  });
+});
+
 describe("InvestigationDashboard: welcome narration plays once per investigation, not once per mount", () => {
   it("narrates the welcome on first open of an investigation", () => {
     renderDashboard();

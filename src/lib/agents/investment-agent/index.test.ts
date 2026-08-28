@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import type { MarketEvidenceSourceInput } from "@/lib/agents/market-agent/prompt";
 import type { MarketAgentOutput } from "@/lib/agents/market-agent/schema";
 import type { AiProvider } from "@/lib/ai/types";
 import type { Opportunity } from "@/lib/phases/opportunity-innovation/schema";
@@ -98,6 +99,16 @@ const leadingOpportunity: Opportunity = {
   validationQuestions: [],
 };
 
+const sources: MarketEvidenceSourceInput[] = [
+  {
+    sourceLocalId: "source-1",
+    title: "eNAM",
+    url: "https://enam.gov.in",
+    snippet: "A national e-market platform for agricultural commodities.",
+    origin: "existing_solutions_reused",
+  },
+];
+
 function context() {
   return {
     phaseKey: "market_investment" as const,
@@ -139,6 +150,7 @@ describe("runInvestmentAgent", () => {
       context(),
       leadingOpportunity,
       marketAnalysis,
+      sources,
       provider,
     );
 
@@ -153,8 +165,22 @@ describe("runInvestmentAgent", () => {
   it("runs cleanly when there is no leading opportunity", async () => {
     const provider = fakeProvider({ status: "ok", model: "x", data: validOutput });
 
-    const result = await runInvestmentAgent(context(), null, marketAnalysis, provider);
+    const result = await runInvestmentAgent(context(), null, marketAnalysis, sources, provider);
 
     expect(result.status).toBe("ok");
+  });
+
+  // Latent instance of the Phase 05 GAP-001 bug class: illustrativeScenario
+  // calculation inputs can carry a sourceIds field validated against the
+  // real evidence source list, but this agent previously was never shown
+  // that list at all.
+  it("shows the model the real evidence source ids, so it has something valid to cite", async () => {
+    const provider = fakeProvider({ status: "ok", model: "x", data: validOutput });
+
+    await runInvestmentAgent(context(), leadingOpportunity, marketAnalysis, sources, provider);
+
+    const call = vi.mocked(provider.generateStructured).mock.calls[0]![0];
+    expect(call.prompt).toContain("source-1");
+    expect(call.prompt).toMatch(/evidence sources/i);
   });
 });

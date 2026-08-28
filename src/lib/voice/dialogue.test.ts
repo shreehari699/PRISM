@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   discoveryDialogue,
+  phaseCompleteDialogue,
+  phaseOpenDialogue,
   phaseTransitionDialogue,
   researchDialogue,
   verdictDialogue,
@@ -52,6 +54,28 @@ describe("researchDialogue", () => {
   it("pluralizes correctly for one vs. many sources", () => {
     expect(researchDialogue(1, "irrigation sensors")).toContain("1 source worth weighing");
     expect(researchDialogue(4, "irrigation sensors")).toContain("4 sources worth weighing");
+  });
+});
+
+describe("phaseOpenDialogue", () => {
+  it("combines the real phase title and its own real description", () => {
+    expect(phaseOpenDialogue("Stakeholder & Pain Analysis", "Identify every stakeholder group.")).toBe(
+      "Stakeholder & Pain Analysis. Identify every stakeholder group.",
+    );
+  });
+});
+
+describe("phaseCompleteDialogue", () => {
+  it("uses the real findings sentence when one is available", () => {
+    expect(phaseCompleteDialogue("Gap Intelligence", "2 confirmed gaps identified.")).toBe(
+      "Gap Intelligence is complete. 2 confirmed gaps identified.",
+    );
+  });
+
+  it("falls back to an honest generic line when findings couldn't be derived", () => {
+    expect(phaseCompleteDialogue("Gap Intelligence", null)).toBe(
+      "Gap Intelligence is complete and ready for your review.",
+    );
   });
 });
 

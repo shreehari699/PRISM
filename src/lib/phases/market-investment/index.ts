@@ -181,6 +181,7 @@ export async function runMarketInvestmentPhase(
     context,
     leadingOpportunity,
     marketResult.data,
+    sourcesForPrompt,
     aiProvider,
   );
   if (investmentResult.status !== "ok") {

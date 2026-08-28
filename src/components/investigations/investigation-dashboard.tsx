@@ -2,14 +2,19 @@
 
 import * as React from "react";
 
+import { PhaseErrorAlert } from "@/components/investigations/phase-error-alert";
 import { PhaseRunner } from "@/components/investigations/phase-runner";
 import { PhaseStepper } from "@/components/investigations/phase-stepper";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { getPhaseDefinition, nextPhase, PHASE_KEYS, type PrismPhaseKey } from "@/lib/prism/phases";
 import { deriveUiPhaseState } from "@/lib/prism/ui-phase-state";
 import type { PhaseAction } from "@/lib/services/phase-engine";
 import type { AnalysisSessionRow, PhaseStateDTO, ProblemStatementRow, ProjectRow } from "@/lib/supabase/rows";
-import { discoveryDialogue, phaseTransitionDialogue, welcomeDialogue } from "@/lib/voice/dialogue";
+import { phaseCompleteDialogue, phaseOpenDialogue, welcomeDialogue } from "@/lib/voice/dialogue";
+import { describePhaseFindings } from "@/lib/voice/phase-findings";
+import {
+  hasPhaseOpenNarrationPlayed,
+  markPhaseOpenNarrationPlayed,
+} from "@/lib/voice/phase-open-narration-store";
 import { useVoiceConsultant } from "@/lib/voice/voice-context";
 import { hasWelcomeNarrationPlayed, markWelcomeNarrationPlayed } from "@/lib/voice/welcome-narration-store";
 
@@ -78,6 +83,21 @@ export function InvestigationDashboard({
     return record;
   }, [phases]);
 
+  const selectPhase = React.useCallback(
+    (key: PrismPhaseKey) => {
+      setSelected(key);
+      // Spoken once per phase per investigation — a refresh or navigating
+      // back to an already-opened phase must not replay it, mirroring the
+      // welcome narration's own once-per-investigation guard above.
+      if (!hasPhaseOpenNarrationPlayed(sessionId, key)) {
+        markPhaseOpenNarrationPlayed(sessionId, key);
+        const def = getPhaseDefinition(key);
+        speak(phaseOpenDialogue(def.title, def.description));
+      }
+    },
+    [sessionId, speak],
+  );
+
   const selectedDto: PhaseStateDTO =
     phases.find((p) => p.phaseKey === selected) ?? {
       phaseKey: selected,
@@ -115,23 +135,29 @@ export function InvestigationDashboard({
       }
 
       const updated = body as PhaseStateDTO;
+      const { staleSiblingPhases, ...updatedPhase } = updated;
       setPhases((prev) => {
-        const withoutThis = prev.filter((p) => p.phaseKey !== phaseKey);
-        return [...withoutThis, updated];
+        // `run`/`regenerate` can, as a side effect, mark already-completed
+        // downstream phases `needs_regeneration` on the server — reflect
+        // that here too so the stepper and those phases' views update in
+        // the same pass, with no separate refetch or refresh required.
+        const staleKeys = new Set((staleSiblingPhases ?? []).map((p) => p.phaseKey));
+        const withoutStale = prev.filter((p) => p.phaseKey !== phaseKey && !staleKeys.has(p.phaseKey));
+        return [...withoutStale, updatedPhase, ...(staleSiblingPhases ?? [])];
       });
       setPending(false);
 
       if (action === "run" || action === "regenerate") {
         if (updated.status === "awaiting_approval") {
-          speak(discoveryDialogue(`${getPhaseDefinition(phaseKey).title} is ready for your review`));
+          const title = getPhaseDefinition(phaseKey).title;
+          speak(phaseCompleteDialogue(title, describePhaseFindings(phaseKey, updated.outputData)));
         }
       }
 
       if (action === "approve") {
         const next = nextPhase(phaseKey);
         if (next) {
-          setSelected(next.key);
-          speak(phaseTransitionDialogue(next.order, next.title));
+          selectPhase(next.key);
         }
       }
     } catch (err) {
@@ -159,15 +185,11 @@ export function InvestigationDashboard({
         </p>
       </div>
 
-      {error ? (
-        <Alert variant="destructive" role="alert">
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      ) : null}
+      {error ? <PhaseErrorAlert message={error} /> : null}
 
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-[220px_1fr]">
         <aside>
-          <PhaseStepper states={uiStates} selected={selected} onSelect={setSelected} />
+          <PhaseStepper states={uiStates} selected={selected} onSelect={selectPhase} />
         </aside>
 
         <div>

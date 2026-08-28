@@ -3,6 +3,7 @@ import * as React from "react";
 
 import { DetailsSection } from "@/components/investigations/details-section";
 import { GenericPhaseOutput } from "@/components/investigations/generic-phase-output";
+import { PhaseExecutiveSummary } from "@/components/investigations/phase-executive-summary";
 import { ScoreBar } from "@/components/investigations/score-bar";
 import { StatusChip } from "@/components/investigations/status-chip";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -90,6 +91,17 @@ export function RedTeamJuryView({ output }: { output: PocValidationAnalysis }) {
 
   return (
     <div className="flex flex-col gap-8">
+      <PhaseExecutiveSummary
+        headline={`Validation decision: ${output.finalValidationDecision.replaceAll("_", " ").toLowerCase()}`}
+        stats={[
+          { label: "Failure modes", value: output.failureModes.length },
+          { label: "Red team points", value: output.redTeamReview.points.length },
+          { label: "Jury questions", value: output.juryQuestions.length },
+        ]}
+        confidence={<StatusChip status={output.confidenceSummary.overallConfidence} />}
+        uncertainty={fragileAssumption?.assumption}
+      />
+
       <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-6">
         <h3 className="flex items-center gap-2 text-lg font-semibold text-destructive">
           <Flame className="size-5" aria-hidden="true" />

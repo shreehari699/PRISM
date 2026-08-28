@@ -393,6 +393,56 @@ describe("runOpportunityInnovationPhase", () => {
     expect(result.status).toBe("invalid_output");
   });
 
+  // Literal regression test for the production bug: `Opportunity "OPP-001"
+  // has a claim citing unknown source "GAP-001"`. A real, valid gap id
+  // (gap-1) is not automatically a valid source id — the two are separate
+  // namespaces, and a gap id landing in a sourceIds field must be rejected
+  // exactly like any other unknown source, not silently accepted because
+  // it happens to be "known" in some other namespace.
+  it('rejects a gap id used as a sourceId (the literal "GAP-001 as source" production bug)', async () => {
+    const provider = providerWithSequence([
+      {
+        status: "ok",
+        model: "x",
+        data: validOpportunityOutput({
+          opportunities: [opportunity({ unservedNeed: claim("INFERENCE", ["gap-1"]) })],
+        }),
+      },
+    ]);
+
+    const result = await runOpportunityInnovationPhase(context(), provider);
+    expect(result.status).toBe("invalid_output");
+    if (result.status === "invalid_output") {
+      expect(result.message).toMatch(/unknown source "gap-1"/);
+    }
+  });
+
+  it("accepts a valid sourceId reference (source-1 is a real Phase 03 source)", async () => {
+    const provider = providerWithSequence([
+      {
+        status: "ok",
+        model: "x",
+        data: validOpportunityOutput({
+          opportunities: [opportunity({ unservedNeed: claim("VERIFIED", ["source-1"]) })],
+        }),
+      },
+      { status: "ok", model: "x", data: validInnovationOutput() },
+    ]);
+
+    const result = await runOpportunityInnovationPhase(context(), provider);
+    expect(result.status).toBe("ok");
+  });
+
+  it("accepts a valid gapId reference (gap-1 is a real Phase 04 candidate gap)", async () => {
+    const provider = providerWithSequence([
+      { status: "ok", model: "x", data: validOpportunityOutput({ opportunities: [opportunity({ relatedGaps: ["gap-1"] })] }) },
+      { status: "ok", model: "x", data: validInnovationOutput() },
+    ]);
+
+    const result = await runOpportunityInnovationPhase(context(), provider);
+    expect(result.status).toBe("ok");
+  });
+
   it("rejects an innovation assessment referencing an unknown opportunity", async () => {
     const provider = providerWithSequence([
       { status: "ok", model: "x", data: validOpportunityOutput() },

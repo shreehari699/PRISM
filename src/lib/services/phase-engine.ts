@@ -374,15 +374,28 @@ async function runOrRegenerate(
     const stalePhaseKeys = orchestrator.getPhasesRequiringRegeneration(
       params.phaseKey,
     );
+    let staleSiblingPhases: PhaseStateDTO[] | undefined;
     if (stalePhaseKeys.length > 0) {
       await params.admin
         .from("analysis_phases")
         .update({ status: "needs_regeneration" })
         .eq("session_id", params.sessionId)
         .in("phase_key", stalePhaseKeys);
+
+      // The UI only asked to act on `params.phaseKey`, but this write just
+      // silently staled out other phases it already has loaded — surface
+      // their new status in the same response instead of leaving the
+      // client to find out on its next manual refresh.
+      const staleKeySet = new Set(stalePhaseKeys);
+      staleSiblingPhases = context.phases
+        .filter((p) => staleKeySet.has(p.phase_key))
+        .map((p) => toPhaseStateDTO({ ...p, status: "needs_regeneration" }));
     }
 
-    return ok(toPhaseStateDTO(analysisPhaseRowSchema.parse(updatedRow)));
+    return ok({
+      ...toPhaseStateDTO(analysisPhaseRowSchema.parse(updatedRow)),
+      staleSiblingPhases,
+    });
   }
 
   const message =

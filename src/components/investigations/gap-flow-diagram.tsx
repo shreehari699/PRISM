@@ -1,10 +1,4 @@
-"use client";
-
-import { motion, useReducedMotion } from "framer-motion";
-import { ArrowRight } from "lucide-react";
-import type React from "react";
-
-import { EvidenceBadge } from "@/components/investigations/evidence-badge";
+import { EvidenceClaimCard } from "@/components/investigations/evidence-claim";
 import { StatusChip } from "@/components/investigations/status-chip";
 import { Badge } from "@/components/ui/badge";
 import type { CoverageMatrixEntry, GapCandidate } from "@/lib/agents/gap-agent/schema";
@@ -16,106 +10,98 @@ const GAP_STATE_LABELS: Record<GapCandidate["gapState"], string> = {
   NO_GAP_ESTABLISHED: "No gap — already covered",
 };
 
-function Node({ children, emphasis }: { children: React.ReactNode; emphasis?: boolean }) {
+/** ✓ fully covered, ~ partially covered, ? not established/unknown — never invented, always a real `coverageStatusSchema` value. */
+const COVERAGE_SYMBOL: Record<CoverageMatrixEntry["status"], string> = {
+  COVERED: "✓",
+  PARTIALLY_COVERED: "~",
+  NOT_ESTABLISHED: "?",
+  UNKNOWN: "?",
+};
+
+function GapCard({ gap, coverage }: { gap: GapCandidate; coverage: CoverageMatrixEntry[] }) {
+  const relevantCoverage = coverage.filter((c) => gap.relatedExistingSolutions.includes(c.existingSolutionId));
+
   return (
-    <div
-      className={
-        emphasis
-          ? "rounded-lg border border-destructive/40 bg-destructive/5 p-4"
-          : "rounded-lg border border-border bg-card p-4"
-      }
-    >
-      {children}
-    </div>
-  );
-}
-
-function GapFlow({ gap, coverage }: { gap: GapCandidate; coverage: CoverageMatrixEntry[] }) {
-  const shouldReduceMotion = useReducedMotion();
-  const relevant = coverage.filter((c) => gap.relatedExistingSolutions.includes(c.existingSolutionId));
-
-  const steps = [
-    <Node key="existing">
-      <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        Existing solution(s)
-      </p>
-      <div className="mt-2 flex flex-wrap gap-1.5">
-        {gap.relatedExistingSolutions.length > 0 ? (
-          gap.relatedExistingSolutions.map((id) => (
-            <Badge key={id} variant="outline">
-              {id}
-            </Badge>
-          ))
-        ) : (
-          <p className="text-sm text-muted-foreground">None considered directly comparable.</p>
-        )}
+    <div className="flex flex-col gap-4 rounded-lg border border-border bg-card p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex flex-col gap-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-mono text-xs text-muted-foreground">{gap.gapId}</span>
+            <h4 className="text-sm font-semibold tracking-tight">{gap.title}</h4>
+          </div>
+          <p className="text-sm text-muted-foreground">{gap.description}</p>
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <StatusChip status={gap.gapState} />
+          <Badge variant="outline">{gap.confidence} confidence</Badge>
+        </div>
       </div>
-    </Node>,
-    <Node key="capabilities">
-      <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        Capabilities checked
-      </p>
-      <div className="mt-2 flex flex-col gap-2">
-        {relevant.length > 0 ? (
-          relevant.map((c, i) => (
-            <div key={i} className="flex items-center justify-between gap-2 text-sm">
-              <span className="truncate">{c.capability}</span>
-              <StatusChip status={c.status} />
-            </div>
-          ))
+      <span className="text-xs text-muted-foreground">{GAP_STATE_LABELS[gap.gapState]}</span>
+
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <EvidenceClaimCard label="Missing capability" claim={gap.missingCapability} />
+        <EvidenceClaimCard label="Why it matters" claim={gap.whyItMatters} />
+      </div>
+
+      <div>
+        <p className="mb-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+          Capability coverage checked against existing solutions
+        </p>
+        {relevantCoverage.length > 0 ? (
+          <div className="flex flex-col gap-1.5">
+            {relevantCoverage.map((c, i) => (
+              <div key={i} className="flex items-center gap-2 text-sm">
+                <span
+                  className="flex size-5 shrink-0 items-center justify-center rounded-full border border-border text-xs font-semibold"
+                  aria-hidden="true"
+                >
+                  {COVERAGE_SYMBOL[c.status]}
+                </span>
+                <span className="truncate">{c.capability}</span>
+                <span className="text-xs text-muted-foreground">— {c.reasoning}</span>
+              </div>
+            ))}
+          </div>
         ) : (
           <p className="text-sm text-muted-foreground">No coverage data cross-referenced.</p>
         )}
       </div>
-    </Node>,
-    <Node key="gap" emphasis>
-      <p className="text-xs font-medium tracking-wide text-destructive uppercase">Gap</p>
-      <p className="mt-2 text-sm leading-6">{gap.missingCapability.claim}</p>
-      <div className="mt-2">
-        <EvidenceBadge status={gap.missingCapability.status} />
-      </div>
-    </Node>,
-    <Node key="need">
-      <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        Unserved need
-      </p>
-      <p className="mt-2 text-sm leading-6">{gap.whyItMatters.claim}</p>
-    </Node>,
-  ];
 
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <h4 className="text-sm font-semibold tracking-tight">{gap.title}</h4>
-        <StatusChip status={gap.gapState} />
-        <span className="text-xs text-muted-foreground">{GAP_STATE_LABELS[gap.gapState]}</span>
+      <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
+        <span>
+          Compared against:{" "}
+          {gap.relatedExistingSolutions.length > 0 ? (
+            gap.relatedExistingSolutions.map((id) => (
+              <Badge key={id} variant="outline" className="ml-1">
+                {id}
+              </Badge>
+            ))
+          ) : (
+            <em>no directly comparable existing solution</em>
+          )}
+        </span>
       </div>
-      <p className="text-sm text-muted-foreground">{gap.description}</p>
-      <div className="grid grid-cols-1 items-stretch gap-2 sm:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr]">
-        {steps.map((step, i) => (
-          <motion.div
-            key={i}
-            initial={shouldReduceMotion ? undefined : { opacity: 0, x: -12 }}
-            whileInView={shouldReduceMotion ? undefined : { opacity: 1, x: 0 }}
-            viewport={{ once: true, margin: "-40px" }}
-            transition={{ duration: 0.4, delay: shouldReduceMotion ? 0 : i * 0.12 }}
-            className="contents"
-          >
-            {step}
-            {i < steps.length - 1 ? (
-              <ArrowRight
-                className="hidden size-4 shrink-0 self-center text-muted-foreground sm:block"
-                aria-hidden="true"
-              />
-            ) : null}
-          </motion.div>
-        ))}
-      </div>
+
+      {gap.evidenceClaims.length > 0 ? (
+        <div className="flex flex-col gap-2">
+          <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Evidence</p>
+          <div className="flex flex-col gap-2">
+            {gap.evidenceClaims.map((claim, i) => (
+              <EvidenceClaimCard key={i} label={`Evidence ${i + 1}`} claim={claim} />
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
 
-/** Renders "Existing Solution -> Capabilities -> Covered Needs -> GAP -> Unserved Need" for every real, non-rejected gap candidate. Nothing here is invented — every node is a field already on the gap candidate or a cross-referenced coverage-matrix entry. */
+/**
+ * Full-width intelligence cards for every real, non-rejected gap
+ * candidate — one card per gap, nothing invented: every field is either
+ * on the gap candidate itself or a cross-referenced coverage-matrix
+ * entry.
+ */
 export function GapFlowDiagram({
   gaps,
   coverageMatrix,
@@ -135,9 +121,9 @@ export function GapFlowDiagram({
   }
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-4">
       {shown.map((gap) => (
-        <GapFlow key={gap.gapId} gap={gap} coverage={coverageMatrix} />
+        <GapCard key={gap.gapId} gap={gap} coverage={coverageMatrix} />
       ))}
     </div>
   );

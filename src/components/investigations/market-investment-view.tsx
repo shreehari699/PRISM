@@ -1,6 +1,7 @@
 import { DetailsSection } from "@/components/investigations/details-section";
 import { GenericPhaseOutput } from "@/components/investigations/generic-phase-output";
 import { MarketNumberDisplay } from "@/components/investigations/market-number";
+import { PhaseExecutiveSummary } from "@/components/investigations/phase-executive-summary";
 import { ScoreBar } from "@/components/investigations/score-bar";
 import { StatusChip } from "@/components/investigations/status-chip";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -10,7 +11,20 @@ import type { MarketInvestmentAnalysis } from "@/lib/phases/market-investment/sc
 export function MarketInvestmentView({ output }: { output: MarketInvestmentAnalysis }) {
   return (
     <div className="flex flex-col gap-6">
-      <p className="text-sm leading-6">{output.marketSummary}</p>
+      <PhaseExecutiveSummary
+        headline={output.marketSummary}
+        stats={[
+          { label: "Competitors", value: output.competitiveLandscape.competitors.length },
+          { label: "Business models", value: output.businessModels.length },
+          { label: "Sources referenced", value: output.evidenceSummary.totalSourcesReferenced },
+        ]}
+        confidence={
+          <>
+            <StatusChip status={output.marketRealityCheck.signal} />
+            <StatusChip status={output.investmentRealityCheck.signal} />
+          </>
+        }
+      />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <MarketNumberDisplay label="TAM" n={output.tamAnalysis.value} />

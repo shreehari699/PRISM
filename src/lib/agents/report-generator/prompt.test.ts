@@ -731,6 +731,17 @@ describe("buildSystemInstruction (Report Generator)", () => {
     const instruction = buildSystemInstruction("RESEARCH", ["gap"]);
     expect(instruction).toMatch(/can never be more optimistic/);
   });
+
+  // Root-cause regression test, same bug class as the Phase 05 GAP-001
+  // production failure: decisionTrace.market/feasibility/validation and
+  // redTeamSelection.biggest*RiskValidationId are validated by the
+  // composer against three separate id families (market source ids, risk
+  // register ids, validation claim ids) — this asserts the model is told
+  // not to substitute a gap/pain/opportunity/assumption id for one of them.
+  it("forbids substituting a gap, pain, opportunity, or assumption id for a market/feasibility/validation citation", () => {
+    const instruction = buildSystemInstruction("HACKATHON", ["demo_feasibility"]);
+    expect(instruction).toMatch(/never a gap id, pain id, opportunity id, or assumption id/i);
+  });
 });
 
 describe("buildUserPrompt (Report Generator)", () => {
@@ -755,6 +766,73 @@ describe("buildUserPrompt (Report Generator)", () => {
     expect(prompt).toContain("[rt-1]");
     expect(prompt).toContain("[fm-1]");
     expect(prompt).toContain("[jq-1]");
+  });
+
+  // Root-cause regression test: decisionTrace.market, decisionTrace.feasibility,
+  // decisionTrace.validation, and redTeamSelection.biggest*RiskValidationId are
+  // each validated against a specific real id family (market evidence source
+  // ids, risk register ids, validation claim ids) that this prompt previously
+  // never showed the model — leaving it to reach for the wrong id namespace,
+  // exactly like the Phase 05 GAP-001 production bug.
+  it("shows the real market evidence source ids, risk register ids, and validation claim ids the model must cite", () => {
+    const prompt = buildUserPrompt(
+      "Farmers lack pricing.",
+      problemAnatomy,
+      stakeholderPain,
+      existingSolutions,
+      gapIntelligence,
+      opportunityInnovation,
+      marketInvestment,
+      {
+        ...technicalFeasibility,
+        riskRegister: [
+          {
+            riskId: "risk-1",
+            title: "Data access",
+            category: "DATA",
+            description: "d",
+            likelihood: "medium",
+            impact: "medium",
+            severity: "medium",
+            mitigation: "m",
+            residualRisk: "low",
+            basis: "ai_estimate",
+            confidence: "medium",
+          },
+        ],
+      },
+      baseSolutionConsultant(),
+      basePocValidation(),
+    );
+    expect(prompt).toContain("[source-1]");
+    expect(prompt).toMatch(/market evidence sources[\s\S]*only valid ids for a decisionTrace\.market citation/i);
+    expect(prompt).toContain("[risk-1]");
+    expect(prompt).toMatch(/risk register[\s\S]*only valid ids for a decisionTrace\.feasibility citation/i);
+    expect(prompt).toContain("[val-1]");
+    expect(prompt).toMatch(/validation claims[\s\S]*only valid ids for redTeamSelection\.biggest\*RiskValidationId/i);
+  });
+
+  it("shows every opportunity id, not just the leading one, for decisionTrace.opportunity citations", () => {
+    const prompt = buildUserPrompt(
+      "Farmers lack pricing.",
+      problemAnatomy,
+      stakeholderPain,
+      existingSolutions,
+      gapIntelligence,
+      {
+        ...opportunityInnovation,
+        opportunities: [
+          opportunityInnovation.opportunities[0]!,
+          { ...opportunityInnovation.opportunities[0]!, opportunityId: "opp-2" },
+        ],
+      },
+      marketInvestment,
+      technicalFeasibility,
+      baseSolutionConsultant(),
+      basePocValidation(),
+    );
+    expect(prompt).toContain("[opp-1]");
+    expect(prompt).toContain("[opp-2]");
   });
 
   it("notes when Phase 05 found no meaningful opportunity", () => {

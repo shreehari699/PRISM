@@ -2,6 +2,7 @@ import { AlertTriangle } from "lucide-react";
 
 import { DetailsSection } from "@/components/investigations/details-section";
 import { GenericPhaseOutput } from "@/components/investigations/generic-phase-output";
+import { PhaseExecutiveSummary } from "@/components/investigations/phase-executive-summary";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import type { SolutionConsultantAnalysis } from "@/lib/phases/solution-consultant/schema";
@@ -21,6 +22,15 @@ export function SolutionConsultantView({ output }: { output: SolutionConsultantA
 
   return (
     <div className="flex flex-col gap-6">
+      <PhaseExecutiveSummary
+        headline={`${solution.name} — ${solution.tagline}`}
+        stats={[
+          { label: "Core features", value: solution.coreFeatures.length },
+          { label: "Risks", value: solution.risks.length },
+          { label: "Acknowledged blockers", value: output.acknowledgedCriticalBlockers.length },
+        ]}
+      />
+
       <div className="rounded-lg border border-prism/20 bg-prism/5 p-4">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="text-lg font-semibold tracking-tight">{solution.name}</h3>

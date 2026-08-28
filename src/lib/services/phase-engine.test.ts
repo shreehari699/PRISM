@@ -1043,6 +1043,56 @@ describe("executePhaseAction: stakeholder_pain (Phase 02) depends on an approved
       admin.from as unknown as ReturnType<typeof vi.fn>
     ).mock.calls.filter((call: unknown[]) => call[0] === "analysis_phases");
     expect(analysisPhaseCalls).toHaveLength(3);
+
+    // Regression: the client only asked to act on problem_intelligence, but
+    // this action also staled stakeholder_pain server-side. That must come
+    // back in the same response so the UI can update both without a manual
+    // refresh — see investigation-dashboard.tsx's staleSiblingPhases merge.
+    if (result.ok) {
+      expect(result.data.staleSiblingPhases).toHaveLength(1);
+      expect(result.data.staleSiblingPhases?.[0]).toMatchObject({
+        phaseKey: "stakeholder_pain",
+        status: "needs_regeneration",
+      });
+    }
+  });
+
+  it("returns no staleSiblingPhases when a run has no downstream phases to stale", async () => {
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [rows([])],
+    });
+    const admin = createMockDb({
+      analysis_phases: [
+        row(phaseRow({ id: "phase-1", status: "running", version: 1 })),
+        row(
+          phaseRow({
+            id: "phase-1",
+            status: "awaiting_approval",
+            version: 1,
+            output_data: validAnatomy,
+          }),
+        ),
+      ],
+    });
+    const provider = fakeProvider({ status: "ok", model: "fake-model", data: validAnatomy });
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "problem_intelligence",
+      action: "run",
+      aiProvider: provider,
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.staleSiblingPhases).toBeUndefined();
+    }
   });
 });
 

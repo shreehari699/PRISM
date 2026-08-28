@@ -1,5 +1,6 @@
 import { DetailsSection } from "@/components/investigations/details-section";
 import { GenericPhaseOutput } from "@/components/investigations/generic-phase-output";
+import { PhaseExecutiveSummary } from "@/components/investigations/phase-executive-summary";
 import { ScoreBar } from "@/components/investigations/score-bar";
 import { StatusChip } from "@/components/investigations/status-chip";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -14,6 +15,16 @@ export function OpportunityInnovationView({ output }: { output: OpportunityInnov
 
   return (
     <div className="flex flex-col gap-6">
+      <PhaseExecutiveSummary
+        headline={
+          leading
+            ? `Leading opportunity: ${leading.title}`
+            : `No meaningful opportunity emerged (${output.overallFinding.replace(/_/g, " ").toLowerCase()}).`
+        }
+        stats={[{ label: "Opportunities", value: output.opportunities.length }]}
+        confidence={leading ? <StatusChip status={leading.opportunityState} /> : undefined}
+      />
+
       <Alert variant={output.overallFinding === "NO_MEANINGFUL_OPPORTUNITY" ? "warning" : "default"}>
         <AlertTitle>{output.overallFinding.replace(/_/g, " ")}</AlertTitle>
       </Alert>

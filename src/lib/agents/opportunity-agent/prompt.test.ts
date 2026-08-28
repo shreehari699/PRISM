@@ -80,7 +80,18 @@ const stakeholderPain: StakeholderPainAnalysis = {
 
 const existingSolutions: ExistingSolutionsAnalysis = {
   queries: [],
-  sources: [],
+  sources: [
+    {
+      sourceLocalId: "source-1",
+      query: "existing solutions",
+      category: "COMMERCIAL",
+      title: "eNAM",
+      url: "https://enam.gov.in",
+      sourceType: "government",
+      retrievedAt: "2025-01-01T00:00:00.000Z",
+      snippet: "A national e-market platform for agricultural commodities.",
+    },
+  ],
   solutions: [],
   researchCoverage: {
     commercial: "INSUFFICIENT",
@@ -158,6 +169,15 @@ describe("buildSystemInstruction (Opportunity Agent)", () => {
     const instruction = buildSystemInstruction("PBL", ["literature"]);
     expect(instruction).toMatch(/NO_GAP_ESTABLISHED.*should never become an opportunity/i);
   });
+
+  // Root-cause regression test: the actual production bug was
+  // `Opportunity "OPP-001" has a claim citing unknown source "GAP-001"`
+  // — a gap id ended up in a sourceIds field. This asserts the system
+  // instruction now explicitly separates the two id namespaces.
+  it("explicitly forbids using a gap id, stakeholder id, or pain id as a sourceIds value", () => {
+    const instruction = buildSystemInstruction("HACKATHON", ["demo_feasibility"]);
+    expect(instruction).toMatch(/never a gap id, a stakeholder id, a pain id, or an opportunity id/i);
+  });
 });
 
 describe("buildUserPrompt (Opportunity Agent)", () => {
@@ -179,5 +199,26 @@ describe("buildUserPrompt (Opportunity Agent)", () => {
       gapCandidates: [],
     });
     expect(prompt).toMatch(/identified no gap candidates/i);
+  });
+
+  // Root-cause regression test: without this, the model was never shown
+  // any real Phase 03 source id and had nothing valid to put in a
+  // `sourceIds` field — reaching for a gap id instead was the actual
+  // production failure.
+  it("shows the real Phase 03 source ids so the model has something valid to cite in sourceIds", () => {
+    const prompt = buildUserPrompt(
+      problemAnatomy,
+      stakeholderPain,
+      existingSolutions,
+      gapIntelligence,
+    );
+    expect(prompt).toContain("[source-1]");
+    expect(prompt).toMatch(/research sources[\s\S]*only valid values for any `sourceIds`/i);
+  });
+
+  it("tells the model explicitly when no research sources exist, rather than leaving it to guess", () => {
+    const prompt = buildUserPrompt(problemAnatomy, stakeholderPain, { ...existingSolutions, sources: [] }, gapIntelligence);
+    expect(prompt).toMatch(/no research sources are available/i);
+    expect(prompt).toMatch(/sourceIds[\s\S]*must stay empty/i);
   });
 });

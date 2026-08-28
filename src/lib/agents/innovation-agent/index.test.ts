@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { DraftOpportunity } from "@/lib/agents/opportunity-agent/schema";
+import type { PhaseSource } from "@/lib/agents/research-agent/schema";
 import type { AiProvider } from "@/lib/ai/types";
 
 import { runInnovationAgent } from "./index";
@@ -46,6 +47,19 @@ const opportunity: DraftOpportunity = {
   opportunityState: "PROMISING_OPPORTUNITY",
 };
 
+const sources: PhaseSource[] = [
+  {
+    sourceLocalId: "source-1",
+    query: "existing solutions",
+    category: "COMMERCIAL",
+    title: "eNAM",
+    url: "https://enam.gov.in",
+    sourceType: "government",
+    retrievedAt: "2025-01-01T00:00:00.000Z",
+    snippet: "A national e-market platform for agricultural commodities.",
+  },
+];
+
 const validOutput = {
   assessments: [],
   opportunityLandscape: [],
@@ -68,7 +82,7 @@ describe("runInnovationAgent", () => {
   it("calls the provider with the innovation agent schema and the given opportunities", async () => {
     const provider = fakeProvider({ status: "ok", model: "x", data: validOutput });
 
-    const result = await runInnovationAgent(context(), [opportunity], provider);
+    const result = await runInnovationAgent(context(), [opportunity], sources, provider);
 
     expect(result.status).toBe("ok");
     expect(provider.generateStructured).toHaveBeenCalledWith(
@@ -81,10 +95,26 @@ describe("runInnovationAgent", () => {
   it("passes an empty opportunity list through without erroring", async () => {
     const provider = fakeProvider({ status: "ok", model: "x", data: validOutput });
 
-    const result = await runInnovationAgent(context(), [], provider);
+    const result = await runInnovationAgent(context(), [], sources, provider);
 
     expect(result.status).toBe("ok");
     const call = vi.mocked(provider.generateStructured).mock.calls[0]![0];
     expect(call.prompt).toMatch(/identified no candidate opportunities/i);
+  });
+
+  // The actual bug this guards against: differentiation.sourceIds is
+  // validated by the phase composer against real Phase 03 source ids —
+  // if this agent is never shown those ids, it has no way to cite one
+  // correctly and reaches for whatever id-shaped tokens ARE in its
+  // context (a gap id, a pain id) instead, producing exactly the
+  // "unknown source" failure a real Phase 05 run hit in production.
+  it("shows the model the real Phase 03 source ids, so it has something valid to cite in differentiation.sourceIds", async () => {
+    const provider = fakeProvider({ status: "ok", model: "x", data: validOutput });
+
+    await runInnovationAgent(context(), [opportunity], sources, provider);
+
+    const call = vi.mocked(provider.generateStructured).mock.calls[0]![0];
+    expect(call.prompt).toContain("source-1");
+    expect(call.prompt).toMatch(/research sources/i);
   });
 });

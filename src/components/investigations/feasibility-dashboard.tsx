@@ -4,6 +4,7 @@ import type React from "react";
 import { DetailsSection } from "@/components/investigations/details-section";
 import { GenericPhaseOutput } from "@/components/investigations/generic-phase-output";
 import { MarketNumberDisplay } from "@/components/investigations/market-number";
+import { PhaseExecutiveSummary } from "@/components/investigations/phase-executive-summary";
 import { ScoreBar } from "@/components/investigations/score-bar";
 import { StatusChip, statusVariant } from "@/components/investigations/status-chip";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -65,6 +66,15 @@ export function FeasibilityDashboard({ output }: { output: TechnicalFeasibilityA
 
   return (
     <div className="flex flex-col gap-6">
+      <PhaseExecutiveSummary
+        headline={output.overallFeasibility.explanation}
+        stats={[
+          { label: "Critical blockers", value: output.criticalBlockers.length },
+          { label: "Team gaps", value: teamGaps.length },
+        ]}
+        confidence={<StatusChip status={output.overallFeasibility.status} />}
+      />
+
       <Card
         className={
           output.overallFeasibility.status === "INFEASIBLE" ||

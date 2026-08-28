@@ -3,6 +3,7 @@ import { CheckCircle2, XCircle } from "lucide-react";
 import { DetailsSection } from "@/components/investigations/details-section";
 import { EvidenceClaimCard } from "@/components/investigations/evidence-claim";
 import { GenericPhaseOutput } from "@/components/investigations/generic-phase-output";
+import { PhaseExecutiveSummary } from "@/components/investigations/phase-executive-summary";
 import { ScoreBar } from "@/components/investigations/score-bar";
 import { Badge } from "@/components/ui/badge";
 import type { ProblemAnatomy } from "@/lib/agents/problem-analyst/schema";
@@ -11,9 +12,24 @@ import type { ProblemAnatomy } from "@/lib/agents/problem-analyst/schema";
 export function ProblemIntelligenceView({ output }: { output: ProblemAnatomy }) {
   return (
     <div className="flex flex-col gap-6">
-      <div className="rounded-lg border border-prism/20 bg-prism/5 p-4">
-        <p className="text-sm leading-6">{output.restatement}</p>
-      </div>
+      <PhaseExecutiveSummary
+        headline={output.restatement}
+        stats={[
+          { label: "Affected groups", value: output.who.length },
+          { label: "Root causes", value: output.why.length },
+          { label: "Assumptions", value: output.assumptions.length },
+          { label: "Open questions", value: output.openQuestions.length },
+        ]}
+        confidence={
+          <Badge variant="outline">
+            Problem score {output.problemScore.value}/100 ({output.problemScore.confidence} confidence)
+          </Badge>
+        }
+        uncertainty={
+          output.openQuestions[0] ??
+          (output.clarity.isWellDefined ? undefined : output.clarity.issues[0])
+        }
+      />
 
       <div className="flex items-center gap-2 text-sm">
         {output.clarity.isWellDefined ? (

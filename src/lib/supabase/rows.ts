@@ -74,6 +74,15 @@ export interface PhaseStateDTO {
   errorMessage: string | null;
   approvedAt: string | null;
   updatedAt: string;
+  /**
+   * Set only on a `run`/`regenerate` response, and only when that action had
+   * a side effect on OTHER phases — marking already-run downstream phases
+   * `needs_regeneration` because the evidence they were built on just
+   * changed. Without surfacing this here, the client has no way to learn
+   * about it short of a manual refresh, since it only asked to act on one
+   * phase and the DB write for the others happens silently on the server.
+   */
+  staleSiblingPhases?: PhaseStateDTO[];
 }
 
 export function toPhaseStateDTO(row: AnalysisPhaseRow): PhaseStateDTO {
