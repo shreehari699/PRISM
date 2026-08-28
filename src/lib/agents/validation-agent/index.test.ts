@@ -592,6 +592,18 @@ describe("runValidationAgent", () => {
     expect(provider.generateStructured).toHaveBeenCalledTimes(1);
   });
 
+  // Same bug class as the Phase 05 GAP-001 production failure: this
+  // agent's sourceIds fields are validated by the composer against real
+  // Phase 06 market evidence source ids.
+  it("passes the real Phase 06 market evidence source ids as sourceIdVocabulary", async () => {
+    const provider = fakeProvider({ status: "unavailable", reason: "n/a" });
+
+    await runValidationAgent(context(), provider);
+
+    const call = vi.mocked(provider.generateStructured).mock.calls[0]![0];
+    expect(call.sourceIdVocabulary).toEqual(["source-1"]);
+  });
+
   it("returns an error without calling the provider when Phase 08 output is missing", async () => {
     const provider = fakeProvider({ status: "unavailable", reason: "n/a" });
 

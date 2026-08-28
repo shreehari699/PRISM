@@ -73,5 +73,10 @@ export async function runFeasibilityAgent(
     ),
     schema: feasibilityAgentOutputSchema,
     temperature: 0.35,
+    // Every `sourceIds` field this schema has (nested throughout its
+    // richEvidenceClaim/marketNumber fields) is validated by the
+    // composer against these same real Phase 06 source ids — see
+    // `sourceIdVocabulary` on `AiGenerateParams`.
+    sourceIdVocabulary: marketInvestment.data.marketEvidence.sources.map((s) => s.sourceLocalId),
   });
 }

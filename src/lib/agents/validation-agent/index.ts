@@ -84,5 +84,8 @@ export async function runValidationAgent(
     ),
     schema: validationAgentOutputSchema,
     temperature: 0.4,
+    // Validated by the composer against these same real Phase 06 source
+    // ids — see `sourceIdVocabulary` on `AiGenerateParams`.
+    sourceIdVocabulary: marketInvestment.data.marketEvidence.sources.map((s) => s.sourceLocalId),
   });
 }

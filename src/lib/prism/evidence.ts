@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { idRefArraySchema } from "./id-refs";
 import { qualitativeLevelSchema } from "./scoring";
 
 /**
@@ -73,6 +74,47 @@ export const richEvidenceClaimSchema = z
   });
 
 export type RichEvidenceClaim = z.infer<typeof richEvidenceClaimSchema>;
+
+/**
+ * A generation-time-constrained variant of `richEvidenceClaimSchema`:
+ * `sourceIds` is a real enum of the ids that actually exist for this
+ * call, not an open `string[]` the model is merely instructed to
+ * respect. Zod's JSON Schema conversion turns `z.enum(...)` into a real
+ * `enum: [...]` constraint in the schema handed to Gemini's structured
+ * output — Gemini honors `enum` during controlled generation, so a value
+ * outside the list becomes something the model literally cannot emit,
+ * not just something it's asked not to. This is the second, stronger
+ * layer on top of (never a replacement for) the composer's own
+ * post-generation cross-reference check, which still re-validates every
+ * output against the real upstream data regardless of what the model
+ * was constrained to — a model that ignores its own schema, or a
+ * provider that doesn't enforce `enum`, is still caught there.
+ *
+ * Use this ONLY to build a per-call schema passed to
+ * `provider.generateStructured`; parse the result back into the static
+ * `richEvidenceClaimSchema`-based output type afterward so downstream
+ * code keeps working with plain `sourceIds: string[]`, not a narrowed
+ * literal-union type tied to one call's specific id list.
+ */
+export function buildRichEvidenceClaimSchema(validSourceIds: readonly string[]) {
+  return z
+    .object({
+      claim: z.string().min(1),
+      status: evidenceStatusSchema,
+      sourceIds: idRefArraySchema(validSourceIds),
+      confidence: qualitativeLevelSchema,
+      reasoning: z.string().min(1),
+    })
+    .superRefine((claim, ctx) => {
+      if (claim.status === "VERIFIED" && claim.sourceIds.length === 0) {
+        ctx.addIssue({
+          code: "custom",
+          message: "A VERIFIED claim must cite at least one source id.",
+          path: ["sourceIds"],
+        });
+      }
+    });
+}
 
 /**
  * Walks an arbitrary parsed-output tree and collects every string found

@@ -78,5 +78,8 @@ export async function runSolutionConsultant(
     ),
     schema: solutionConsultantOutputSchema,
     temperature: 0.35,
+    // Validated by the composer against these same real Phase 06 source
+    // ids — see `sourceIdVocabulary` on `AiGenerateParams`.
+    sourceIdVocabulary: marketInvestment.data.marketEvidence.sources.map((s) => s.sourceLocalId),
   });
 }

@@ -153,7 +153,21 @@ const validMarketInvestment: MarketInvestmentAnalysis = {
   },
   marketDrivers: { adoptionDrivers: [], adoptionBarriers: [] },
   adoptionAnalysis: { factors: [], adoptionRisk: "UNKNOWN", reasoning: "n/a" },
-  marketEvidence: { sources: [], status: "COMPLETE", narrative: "n/a" },
+  marketEvidence: {
+    sources: [
+      {
+        sourceLocalId: "source-1",
+        title: "eNAM",
+        url: "https://enam.gov.in",
+        sourceType: "government",
+        retrievedAt: "2025-01-01T00:00:00.000Z",
+        snippet: "A national e-market platform for agricultural commodities.",
+        origin: "existing_solutions_reused",
+      },
+    ],
+    status: "COMPLETE",
+    narrative: "n/a",
+  },
   tamAnalysis: { definition: "n/a", value: unknownNumber() },
   samAnalysis: { definition: "n/a", value: unknownNumber() },
   somAnalysis: { definition: "n/a", value: unknownNumber() },
@@ -363,6 +377,19 @@ describe("runFeasibilityAgent", () => {
     expect(provider.generateStructured).toHaveBeenCalledWith(
       expect.objectContaining({ schema: feasibilityAgentOutputSchema }),
     );
+  });
+
+  // Same bug class as the Phase 05 GAP-001 production failure: this
+  // agent's sourceIds fields are validated by the composer against real
+  // Phase 06 market evidence source ids, so the call must carry that
+  // real vocabulary for the provider to constrain generation against.
+  it("passes the real Phase 06 market evidence source ids as sourceIdVocabulary", async () => {
+    const provider = fakeProvider({ status: "ok", model: "x", data: validOutput });
+
+    await runFeasibilityAgent(context(), provider);
+
+    const call = vi.mocked(provider.generateStructured).mock.calls[0]![0];
+    expect(call.sourceIdVocabulary).toEqual(["source-1"]);
   });
 
   it("runs cleanly when Phase 05 found no meaningful opportunity", async () => {

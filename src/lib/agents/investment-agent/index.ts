@@ -7,7 +7,7 @@ import type { PhaseExecutionContext } from "@/lib/orchestrator/types";
 import type { Opportunity } from "@/lib/phases/opportunity-innovation/schema";
 
 import { buildSystemInstruction, buildUserPrompt } from "./prompt";
-import { investmentAgentOutputSchema, type InvestmentAgentOutput } from "./schema";
+import { buildDynamicInvestmentAgentOutputSchema, type InvestmentAgentOutput } from "./schema";
 
 export * from "./schema";
 
@@ -28,10 +28,14 @@ export async function runInvestmentAgent(
   sources: MarketEvidenceSourceInput[],
   provider: AiProvider = getAiProvider(),
 ): Promise<AiResult<InvestmentAgentOutput>> {
-  return provider.generateStructured({
+  const dynamicSchema = buildDynamicInvestmentAgentOutputSchema(sources.map((s) => s.sourceLocalId));
+
+  const result = await provider.generateStructured({
     systemInstruction: buildSystemInstruction(context.mode, context.criteria),
     prompt: buildUserPrompt(context.problemStatement, leadingOpportunity, marketAnalysis, sources),
-    schema: investmentAgentOutputSchema,
+    schema: dynamicSchema,
     temperature: 0.35,
   });
+
+  return result as AiResult<InvestmentAgentOutput>;
 }

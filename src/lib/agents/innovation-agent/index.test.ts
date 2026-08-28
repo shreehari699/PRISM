@@ -5,7 +5,6 @@ import type { PhaseSource } from "@/lib/agents/research-agent/schema";
 import type { AiProvider } from "@/lib/ai/types";
 
 import { runInnovationAgent } from "./index";
-import { innovationAgentOutputSchema } from "./schema";
 
 function fakeProvider(
   result: Awaited<ReturnType<AiProvider["generateStructured"]>>,
@@ -79,17 +78,66 @@ function context() {
 }
 
 describe("runInnovationAgent", () => {
-  it("calls the provider with the innovation agent schema and the given opportunities", async () => {
+  it("calls the provider with a schema accepting a valid assessment for the given opportunities", async () => {
     const provider = fakeProvider({ status: "ok", model: "x", data: validOutput });
 
     const result = await runInnovationAgent(context(), [opportunity], sources, provider);
 
     expect(result.status).toBe("ok");
-    expect(provider.generateStructured).toHaveBeenCalledWith(
-      expect.objectContaining({ schema: innovationAgentOutputSchema }),
-    );
     const call = vi.mocked(provider.generateStructured).mock.calls[0]![0];
     expect(call.prompt).toContain("opp-1");
+    expect(call.schema.safeParse(validOutput).success).toBe(true);
+  });
+
+  function assessmentWithSourceIds(sourceIds: string[]) {
+    return {
+      opportunityId: "opp-1",
+      innovationDirections: [],
+      differentiation: { claim: "x", status: "INFERENCE", sourceIds, confidence: "medium", reasoning: "y" },
+      innovationPotential: { value: 55, basis: "ai_estimate", reasoning: "n/a", confidence: "medium" },
+      feasibilityPotential: { value: 50, basis: "ai_estimate", reasoning: "n/a", confidence: "medium" },
+      refinedOpportunityState: "PROMISING_OPPORTUNITY",
+      validationQuestions: [],
+    };
+  }
+
+  // The literal production bug, reproduced at the schema-construction
+  // level for this agent's own sourceIds field.
+  it("builds a schema that rejects a gap id used as differentiation.sourceIds", async () => {
+    const provider = fakeProvider({ status: "ok", model: "x", data: validOutput });
+
+    await runInnovationAgent(context(), [opportunity], sources, provider);
+
+    const call = vi.mocked(provider.generateStructured).mock.calls[0]![0];
+    const withGapAsSource = {
+      assessments: [assessmentWithSourceIds(["gap-1"])],
+      opportunityLandscape: [],
+      opportunityRealityCheck: { signal: "PROMISING", explanation: "e" },
+      consultantMessage: "m",
+    };
+    const withRealSource = {
+      ...withGapAsSource,
+      assessments: [assessmentWithSourceIds(["source-1"])],
+    };
+
+    expect(call.schema.safeParse(withGapAsSource).success).toBe(false);
+    expect(call.schema.safeParse(withRealSource).success).toBe(true);
+  });
+
+  it("builds a schema that rejects an assessment referencing an opportunity id that wasn't actually given", async () => {
+    const provider = fakeProvider({ status: "ok", model: "x", data: validOutput });
+
+    await runInnovationAgent(context(), [opportunity], sources, provider);
+
+    const call = vi.mocked(provider.generateStructured).mock.calls[0]![0];
+    expect(
+      call.schema.safeParse({
+        assessments: [{ ...assessmentWithSourceIds([]), opportunityId: "ghost-opp" }],
+        opportunityLandscape: [],
+        opportunityRealityCheck: { signal: "PROMISING", explanation: "e" },
+        consultantMessage: "m",
+      }).success,
+    ).toBe(false);
   });
 
   it("passes an empty opportunity list through without erroring", async () => {

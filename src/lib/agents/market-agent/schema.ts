@@ -1,7 +1,8 @@
 import { z } from "zod";
 
-import { richEvidenceClaimSchema } from "@/lib/prism/evidence";
-import { marketNumberSchema } from "@/lib/prism/market";
+import { buildRichEvidenceClaimSchema, richEvidenceClaimSchema } from "@/lib/prism/evidence";
+import { idRefArraySchema } from "@/lib/prism/id-refs";
+import { buildMarketNumberSchema, marketNumberSchema } from "@/lib/prism/market";
 import { qualitativeLevelSchema, scoreSchema } from "@/lib/prism/scoring";
 
 /**
@@ -291,3 +292,104 @@ export const marketAgentOutputSchema = z.object({
   validationQuestions: z.array(z.string().min(1)).default([]),
 });
 export type MarketAgentOutput = z.infer<typeof marketAgentOutputSchema>;
+
+/**
+ * A generation-time-constrained variant of `marketAgentOutputSchema`:
+ * every `sourceIds` field — on competitor entries and inside every
+ * `marketNumberSchema`/claim, including nested calculation inputs — is a
+ * real enum of the ids that actually exist for this call, not an open
+ * `string[]` the model is merely instructed to respect. See
+ * `idRefArraySchema` for why this constrains Gemini's structured output
+ * itself. Build fresh per call and parse the result back into the plain
+ * `MarketAgentOutput` type; never a substitute for the composer's own
+ * post-generation cross-reference check against the same real data.
+ */
+export function buildDynamicMarketAgentOutputSchema(validSourceIds: readonly string[]) {
+  const claimSchema = buildRichEvidenceClaimSchema(validSourceIds);
+  const numberSchema = buildMarketNumberSchema(validSourceIds);
+
+  const dynamicCustomerModelSchema = z.object({
+    whoExperiencesThePain: claimSchema,
+    whoUsesTheSolution: claimSchema,
+    whoPays: claimSchema,
+    whoApproves: claimSchema,
+    whoBenefits: claimSchema,
+    roleAssignments: z.array(roleAssignmentSchema).default([]),
+  });
+
+  const dynamicCompetitorEntrySchema = z.object({
+    name: z.string().min(1),
+    organization: z.string().min(1),
+    solution: z.string().min(1),
+    targetCustomer: z.string().min(1),
+    classification: competitorClassificationSchema,
+    strength: claimSchema,
+    limitation: claimSchema,
+    marketPositionIfVerified: claimSchema,
+    sourceIds: idRefArraySchema(validSourceIds),
+    confidence: qualitativeLevelSchema,
+  });
+
+  const dynamicCompetitiveLandscapeSchema = z.object({
+    competitors: z.array(dynamicCompetitorEntrySchema).default([]),
+    summary: claimSchema,
+  });
+
+  const dynamicAdoptionFactorSchema = z.object({
+    factor: adoptionFactorKeySchema,
+    assessment: claimSchema,
+  });
+
+  const dynamicMarketDriversSchema = z.object({
+    adoptionDrivers: z.array(claimSchema).default([]),
+    adoptionBarriers: z.array(claimSchema).default([]),
+  });
+
+  const dynamicMarketSizeAnalysisSchema = z.object({
+    definition: z.string().min(1),
+    value: numberSchema,
+  });
+
+  const dynamicBusinessModelEntrySchema = z.object({
+    model: businessModelTypeSchema,
+    whyItFits: z.string().min(1),
+    whoPays: z.string().min(1),
+    pricingHypothesis: numberSchema,
+    costDriver: z.string().min(1),
+    adoptionFriction: z.string().min(1),
+    confidence: qualitativeLevelSchema,
+  });
+
+  const dynamicUnitEconomicsSchema = z.object({
+    customerAcquisitionCost: numberSchema,
+    revenuePerCustomer: numberSchema,
+    grossMargin: numberSchema,
+    operationalCost: numberSchema,
+    supportCost: numberSchema,
+    infrastructureCost: numberSchema,
+    paybackPeriod: numberSchema,
+    narrative: z.string().min(1),
+  });
+
+  return z.object({
+    marketSummary: z.string().min(1),
+    customerModel: dynamicCustomerModelSchema.nullable(),
+    marketSegments: z.array(marketSegmentEntrySchema).default([]),
+    competitiveLandscape: dynamicCompetitiveLandscapeSchema,
+    marketDrivers: dynamicMarketDriversSchema,
+    adoptionAnalysis: z.object({
+      factors: z.array(dynamicAdoptionFactorSchema).default([]),
+      adoptionRisk: adoptionRiskSchema,
+      reasoning: z.string().min(1),
+    }),
+    tamAnalysis: dynamicMarketSizeAnalysisSchema,
+    samAnalysis: dynamicMarketSizeAnalysisSchema,
+    somAnalysis: dynamicMarketSizeAnalysisSchema,
+    businessModels: z.array(dynamicBusinessModelEntrySchema).default([]),
+    unitEconomics: dynamicUnitEconomicsSchema,
+    scalability: scalabilitySchema,
+    marketRealityCheck: marketRealityCheckSchema,
+    marketScores: marketScoresSchema,
+    validationQuestions: z.array(z.string().min(1)).default([]),
+  });
+}

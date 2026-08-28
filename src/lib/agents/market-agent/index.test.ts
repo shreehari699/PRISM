@@ -7,7 +7,6 @@ import type { StakeholderPainAnalysis } from "@/lib/phases/stakeholder-pain/sche
 
 import { runMarketAgent } from "./index";
 import type { MarketEvidenceSourceInput } from "./prompt";
-import { marketAgentOutputSchema } from "./schema";
 
 function fakeProvider(
   result: Awaited<ReturnType<AiProvider["generateStructured"]>>,
@@ -124,7 +123,15 @@ const validExistingSolutions: ExistingSolutionsAnalysis = {
   consultantMessage: "n/a",
 };
 
-const sources: MarketEvidenceSourceInput[] = [];
+const sources: MarketEvidenceSourceInput[] = [
+  {
+    sourceLocalId: "source-1",
+    title: "eNAM",
+    url: "https://enam.gov.in",
+    snippet: "A national e-market platform for agricultural commodities.",
+    origin: "existing_solutions_reused",
+  },
+];
 const researchSummary = { queriesExecuted: 0, researchFailures: 0, budgetExhausted: false };
 
 function context(upstream: { stakeholderPain?: unknown; existingSolutions?: unknown }) {
@@ -215,7 +222,7 @@ describe("runMarketAgent", () => {
     expect(provider.generateStructured).not.toHaveBeenCalled();
   });
 
-  it("calls the provider with the market agent schema when upstream phases are valid", async () => {
+  it("calls the provider with a schema that accepts a valid output when upstream phases are valid", async () => {
     const provider = fakeProvider({ status: "ok", model: "x", data: validOutput });
 
     const result = await runMarketAgent(
@@ -227,9 +234,61 @@ describe("runMarketAgent", () => {
     );
 
     expect(result.status).toBe("ok");
-    expect(provider.generateStructured).toHaveBeenCalledWith(
-      expect.objectContaining({ schema: marketAgentOutputSchema }),
+    const call = vi.mocked(provider.generateStructured).mock.calls[0]![0];
+    expect(call.schema.safeParse(validOutput).success).toBe(true);
+  });
+
+  // Same bug class as the Phase 05 GAP-001 production failure, reproduced
+  // at the schema-construction level for the Market Agent's own
+  // richEvidenceClaim/marketNumber sourceIds fields.
+  it("builds a schema that rejects a gap id used as a competitor's sourceIds", async () => {
+    const provider = fakeProvider({ status: "ok", model: "x", data: validOutput });
+
+    await runMarketAgent(
+      context({ stakeholderPain: validStakeholderPain, existingSolutions: validExistingSolutions }),
+      leadingOpportunity,
+      sources,
+      researchSummary,
+      provider,
     );
+
+    const call = vi.mocked(provider.generateStructured).mock.calls[0]![0];
+    const withGapAsSource = {
+      ...validOutput,
+      competitiveLandscape: {
+        competitors: [
+          {
+            name: "eNAM",
+            organization: "Government of India",
+            solution: "s",
+            targetCustomer: "farmers",
+            classification: "DIRECT",
+            strength: { claim: "x", status: "INFERENCE", sourceIds: [], confidence: "medium", reasoning: "y" },
+            limitation: { claim: "x", status: "INFERENCE", sourceIds: [], confidence: "medium", reasoning: "y" },
+            marketPositionIfVerified: {
+              claim: "x",
+              status: "INFERENCE",
+              sourceIds: [],
+              confidence: "medium",
+              reasoning: "y",
+            },
+            sourceIds: ["gap-1"],
+            confidence: "medium",
+          },
+        ],
+        summary: { claim: "x", status: "ASSUMPTION", sourceIds: [], confidence: "medium", reasoning: "y" },
+      },
+    };
+    const withRealSource = {
+      ...withGapAsSource,
+      competitiveLandscape: {
+        ...withGapAsSource.competitiveLandscape,
+        competitors: [{ ...withGapAsSource.competitiveLandscape.competitors[0]!, sourceIds: ["source-1"] }],
+      },
+    };
+
+    expect(call.schema.safeParse(withGapAsSource).success).toBe(false);
+    expect(call.schema.safeParse(withRealSource).success).toBe(true);
   });
 
   it("runs cleanly when there is no leading opportunity", async () => {

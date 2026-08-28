@@ -1,7 +1,8 @@
 import { z } from "zod";
 
 import { opportunityStateSchema } from "@/lib/agents/opportunity-agent/schema";
-import { richEvidenceClaimSchema } from "@/lib/prism/evidence";
+import { buildRichEvidenceClaimSchema, richEvidenceClaimSchema } from "@/lib/prism/evidence";
+import { idRefSchema } from "@/lib/prism/id-refs";
 import { qualitativeLevelSchema, scoreSchema } from "@/lib/prism/scoring";
 
 export const innovationDirectionTypeSchema = z.enum([
@@ -128,3 +129,52 @@ export const innovationAgentOutputSchema = z.object({
   consultantMessage: z.string().min(1),
 });
 export type InnovationAgentOutput = z.infer<typeof innovationAgentOutputSchema>;
+
+/**
+ * A generation-time-constrained variant of `innovationAgentOutputSchema`:
+ * `assessments[].opportunityId` and `opportunityLandscape[].opportunityId`
+ * are real enums of the draft opportunity ids this call was actually
+ * given, and every `differentiation.sourceIds` is a real enum of the
+ * actual Phase 03 source ids — see `idRefArraySchema`/`idRefSchema` for
+ * why this constrains Gemini's structured output itself. Build fresh per
+ * call and parse the result back into the plain `InnovationAgentOutput`
+ * type; never a substitute for the composer's own post-generation
+ * cross-reference check against the same real data.
+ */
+export function buildDynamicInnovationAgentOutputSchema(validIds: {
+  opportunityIds: readonly string[];
+  sourceIds: readonly string[];
+}) {
+  const claimSchema = buildRichEvidenceClaimSchema(validIds.sourceIds);
+  const opportunityIdField = idRefSchema(validIds.opportunityIds);
+
+  const dynamicAssessmentSchema = z.object({
+    opportunityId: opportunityIdField,
+    innovationDirections: z.array(innovationDirectionSchema).default([]),
+    differentiation: claimSchema,
+    innovationPotential: scoreSchema,
+    feasibilityPotential: scoreSchema,
+    refinedOpportunityState: opportunityStateSchema,
+    validationQuestions: z.array(z.string().min(1)).default([]),
+  });
+
+  const dynamicLandscapeEntrySchema = z.object({
+    opportunityId: opportunityIdField,
+    stakeholderValue: qualitativeLevelSchema,
+    painRelevance: qualitativeLevelSchema,
+    gapStrength: qualitativeLevelSchema,
+    differentiationStrength: qualitativeLevelSchema,
+    innovationStrength: qualitativeLevelSchema,
+    feasibilityStrength: qualitativeLevelSchema,
+    impactStrength: qualitativeLevelSchema,
+    confidence: qualitativeLevelSchema,
+    reasoning: z.string().min(1),
+  });
+
+  return z.object({
+    assessments: z.array(dynamicAssessmentSchema).default([]),
+    opportunityLandscape: z.array(dynamicLandscapeEntrySchema).default([]),
+    opportunityRealityCheck: opportunityRealityCheckSchema,
+    consultantMessage: z.string().min(1),
+  });
+}

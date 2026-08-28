@@ -6,7 +6,6 @@ import type { AiProvider } from "@/lib/ai/types";
 import type { Opportunity } from "@/lib/phases/opportunity-innovation/schema";
 
 import { runInvestmentAgent } from "./index";
-import { investmentAgentOutputSchema } from "./schema";
 
 function fakeProvider(
   result: Awaited<ReturnType<AiProvider["generateStructured"]>>,
@@ -143,7 +142,7 @@ const validOutput = {
 };
 
 describe("runInvestmentAgent", () => {
-  it("calls the provider with the investment agent schema and the market analysis", async () => {
+  it("calls the provider with a schema that accepts a valid output", async () => {
     const provider = fakeProvider({ status: "ok", model: "x", data: validOutput });
 
     const result = await runInvestmentAgent(
@@ -155,11 +154,54 @@ describe("runInvestmentAgent", () => {
     );
 
     expect(result.status).toBe("ok");
-    expect(provider.generateStructured).toHaveBeenCalledWith(
-      expect.objectContaining({ schema: investmentAgentOutputSchema }),
-    );
     const call = vi.mocked(provider.generateStructured).mock.calls[0]![0];
     expect(call.prompt).toContain("District-level price transparency service");
+    expect(call.schema.safeParse(validOutput).success).toBe(true);
+  });
+
+  // The latent instance of the Phase 05 GAP-001 bug class this agent
+  // carried: illustrativeScenario.calculation.inputs[].sourceIds is
+  // reachable and validated by the composer against real evidence source
+  // ids, but was never constrained at the schema level either.
+  it("builds a schema that rejects a gap id used as an illustrativeScenario calculation input's sourceIds", async () => {
+    const provider = fakeProvider({ status: "ok", model: "x", data: validOutput });
+
+    await runInvestmentAgent(context(), leadingOpportunity, marketAnalysis, sources, provider);
+
+    const call = vi.mocked(provider.generateStructured).mock.calls[0]![0];
+    const withGapAsSource = {
+      ...validOutput,
+      valuationDrivers: {
+        drivers: [],
+        illustrativeScenario: {
+          status: "ILLUSTRATIVE_MODEL_ESTIMATE",
+          value: 500_000,
+          currency: "INR",
+          calculation: {
+            inputs: [{ label: "x", value: 1, unit: "count", sourceIds: ["gap-1"] }],
+            formula: "x",
+            assumptions: [],
+          },
+          reasoning: "y",
+        },
+      },
+    };
+    const withRealSource = {
+      ...withGapAsSource,
+      valuationDrivers: {
+        ...withGapAsSource.valuationDrivers,
+        illustrativeScenario: {
+          ...withGapAsSource.valuationDrivers.illustrativeScenario,
+          calculation: {
+            ...withGapAsSource.valuationDrivers.illustrativeScenario.calculation,
+            inputs: [{ label: "x", value: 1, unit: "count", sourceIds: ["source-1"] }],
+          },
+        },
+      },
+    };
+
+    expect(call.schema.safeParse(withGapAsSource).success).toBe(false);
+    expect(call.schema.safeParse(withRealSource).success).toBe(true);
   });
 
   it("runs cleanly when there is no leading opportunity", async () => {

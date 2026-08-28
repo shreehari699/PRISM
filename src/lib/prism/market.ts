@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { idRefArraySchema } from "./id-refs";
 import { qualitativeLevelSchema } from "./scoring";
 
 /**
@@ -117,6 +118,91 @@ export const marketNumberSchema = z
 export type MarketNumber = z.infer<typeof marketNumberSchema>;
 
 /**
+ * A generation-time-constrained variant of `marketNumberSchema`: every
+ * `sourceIds` field (on the number itself and on each calculation input)
+ * is a real enum of the ids that actually exist upstream for this call —
+ * see `idRefArraySchema` for why this constrains the model's structured
+ * output itself, not just the prompt. Build fresh per call; never a
+ * substitute for the composer's own post-generation cross-reference
+ * check against the same real data.
+ */
+export function buildMarketNumberSchema(validSourceIds: readonly string[]) {
+  const dynamicCalculationInputSchema = z.object({
+    label: z.string().min(1),
+    value: z.number(),
+    unit: z.string().min(1),
+    sourceIds: idRefArraySchema(validSourceIds),
+  });
+
+  const dynamicCalculationSchema = z.object({
+    inputs: z.array(dynamicCalculationInputSchema).min(1),
+    formula: z.string().min(1),
+    assumptions: z.array(z.string().min(1)).default([]),
+  });
+
+  return z
+    .object({
+      status: marketNumberStatusSchema,
+      value: z.number().nonnegative().nullable(),
+      unit: z.string().min(1).nullable(),
+      currency: z.string().min(1).nullable(),
+      geography: z.string().min(1).nullable(),
+      period: z.string().min(1).nullable(),
+      sourceIds: idRefArraySchema(validSourceIds),
+      calculation: dynamicCalculationSchema.nullable().default(null),
+      confidence: qualitativeLevelSchema,
+      reasoning: z.string().min(1),
+    })
+    .superRefine((n, ctx) => {
+      if (n.status === "UNKNOWN") {
+        if (n.value !== null) {
+          ctx.addIssue({
+            code: "custom",
+            message: "An UNKNOWN market number must have a null value.",
+            path: ["value"],
+          });
+        }
+        return;
+      }
+
+      if (n.value === null) {
+        ctx.addIssue({
+          code: "custom",
+          message: `A ${n.status} market number must have a non-null value.`,
+          path: ["value"],
+        });
+      }
+
+      if (n.status === "VERIFIED") {
+        if (n.sourceIds.length === 0) {
+          ctx.addIssue({
+            code: "custom",
+            message: "A VERIFIED market number must cite at least one source id.",
+            path: ["sourceIds"],
+          });
+        }
+        if (n.calculation !== null) {
+          ctx.addIssue({
+            code: "custom",
+            message:
+              "A VERIFIED market number was read from a source, not derived — it must not carry a calculation. Use MODEL_ESTIMATE instead.",
+            path: ["calculation"],
+          });
+        }
+      }
+
+      if (n.status === "MODEL_ESTIMATE" && n.calculation === null) {
+        ctx.addIssue({
+          code: "custom",
+          message:
+            "A MODEL_ESTIMATE market number must show its calculation (inputs, formula, assumptions) so it is reproducible.",
+          path: ["calculation"],
+        });
+      }
+    });
+}
+
+/**
  * A valuation figure is never allowed to be presented as `VERIFIED` —
  * PRISM never states an exact company valuation as fact. It is either
  * an explicitly-labeled illustrative scenario, or unknown.
@@ -165,3 +251,62 @@ export const illustrativeValuationScenarioSchema = z
 export type IllustrativeValuationScenario = z.infer<
   typeof illustrativeValuationScenarioSchema
 >;
+
+/**
+ * A generation-time-constrained variant of
+ * `illustrativeValuationScenarioSchema`: its `calculation.inputs[].sourceIds`
+ * is a real enum of the ids that actually exist upstream for this call —
+ * see `idRefArraySchema`. This is the exact latent gap the Investment
+ * Agent had: a reachable `sourceIds` path the model was never shown a
+ * real vocabulary for.
+ */
+export function buildIllustrativeValuationScenarioSchema(validSourceIds: readonly string[]) {
+  const dynamicCalculationInputSchema = z.object({
+    label: z.string().min(1),
+    value: z.number(),
+    unit: z.string().min(1),
+    sourceIds: idRefArraySchema(validSourceIds),
+  });
+
+  const dynamicCalculationSchema = z.object({
+    inputs: z.array(dynamicCalculationInputSchema).min(1),
+    formula: z.string().min(1),
+    assumptions: z.array(z.string().min(1)).default([]),
+  });
+
+  return z
+    .object({
+      status: illustrativeValuationStatusSchema,
+      value: z.number().nonnegative().nullable(),
+      currency: z.string().min(1).nullable(),
+      calculation: dynamicCalculationSchema.nullable().default(null),
+      reasoning: z.string().min(1),
+    })
+    .superRefine((n, ctx) => {
+      if (n.status === "UNKNOWN") {
+        if (n.value !== null) {
+          ctx.addIssue({
+            code: "custom",
+            message: "An UNKNOWN valuation scenario must have a null value.",
+            path: ["value"],
+          });
+        }
+        return;
+      }
+
+      if (n.value === null) {
+        ctx.addIssue({
+          code: "custom",
+          message: "An ILLUSTRATIVE_MODEL_ESTIMATE valuation scenario must have a non-null value.",
+          path: ["value"],
+        });
+      }
+      if (n.calculation === null) {
+        ctx.addIssue({
+          code: "custom",
+          message: "An ILLUSTRATIVE_MODEL_ESTIMATE valuation scenario must show its calculation.",
+          path: ["calculation"],
+        });
+      }
+    });
+}

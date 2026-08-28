@@ -7,7 +7,6 @@ import type { GapIntelligenceAnalysis } from "@/lib/phases/gap-intelligence/sche
 import type { StakeholderPainAnalysis } from "@/lib/phases/stakeholder-pain/schema";
 
 import { runOpportunityAgent } from "./index";
-import { opportunityAgentOutputSchema } from "./schema";
 
 function fakeProvider(
   result: Awaited<ReturnType<AiProvider["generateStructured"]>>,
@@ -92,7 +91,18 @@ const validStakeholderPain: StakeholderPainAnalysis = {
 
 const validExistingSolutions: ExistingSolutionsAnalysis = {
   queries: [],
-  sources: [],
+  sources: [
+    {
+      sourceLocalId: "source-1",
+      query: "existing solutions",
+      category: "COMMERCIAL",
+      title: "eNAM",
+      url: "https://enam.gov.in",
+      sourceType: "government",
+      retrievedAt: "2025-01-01T00:00:00.000Z",
+      snippet: "A national e-market platform for agricultural commodities.",
+    },
+  ],
   solutions: [],
   researchCoverage: {
     commercial: "INSUFFICIENT",
@@ -104,10 +114,10 @@ const validExistingSolutions: ExistingSolutionsAnalysis = {
     technology: "INSUFFICIENT",
   },
   stats: {
-    sourcesFound: 0,
-    sourcesUsed: 0,
+    sourcesFound: 1,
+    sourcesUsed: 1,
     solutionsIdentified: 0,
-    queriesExecuted: 0,
+    queriesExecuted: 1,
     researchFailures: 0,
     budgetExhausted: false,
   },
@@ -118,14 +128,31 @@ const validGapIntelligence: GapIntelligenceAnalysis = {
   problemSummary: "s",
   stakeholderSummary: "s",
   solutionLandscapeSummary: "s",
-  gapCandidates: [],
+  gapCandidates: [
+    {
+      gapId: "gap-1",
+      title: "No automated prioritization",
+      description: "d",
+      affectedStakeholders: ["farmer"],
+      relatedPains: ["pain-1"],
+      relatedExistingSolutions: [],
+      missingCapability: { claim: "x", status: "INFERENCE", sourceIds: [], confidence: "medium", reasoning: "y" },
+      whyItMatters: { claim: "x", status: "ASSUMPTION", sourceIds: [], confidence: "medium", reasoning: "y" },
+      evidenceClaims: [],
+      sourceIds: [],
+      gapType: "FUNCTIONAL",
+      confidence: "MEDIUM",
+      gapState: "CANDIDATE_GAP",
+      validationStatus: "NEEDS_VALIDATION",
+    },
+  ],
   confirmedGaps: [],
-  candidateGaps: [],
+  candidateGaps: ["gap-1"],
   unverifiedGaps: [],
   noGapFindings: [],
   coverageMatrix: [],
   gapPriority: [],
-  gapRealityCheck: { signal: "NO_CLEAR_GAP", explanation: "e" },
+  gapRealityCheck: { signal: "MODERATE_GAP_SIGNAL", explanation: "e" },
   validationQuestions: [],
   evidenceSummary: { totalSourcesReferenced: 0, verifiedClaimsCount: 0, narrative: "n" },
   confidenceSummary: { overallConfidence: "LOW", narrative: "n" },
@@ -229,14 +256,78 @@ describe("runOpportunityAgent", () => {
     expect(provider.generateStructured).not.toHaveBeenCalled();
   });
 
-  it("calls the provider with the opportunity agent schema when all four upstream phases are valid", async () => {
+  it("calls the provider with a schema that accepts a valid opportunity output when all four upstream phases are valid", async () => {
     const provider = fakeProvider({ status: "ok", model: "x", data: validOutput });
 
     const result = await runOpportunityAgent(context(fullValidUpstream), provider);
 
     expect(result.status).toBe("ok");
-    expect(provider.generateStructured).toHaveBeenCalledWith(
-      expect.objectContaining({ schema: opportunityAgentOutputSchema }),
+    const call = vi.mocked(provider.generateStructured).mock.calls[0]![0];
+    expect(call.schema.safeParse(validOutput).success).toBe(true);
+  });
+
+  function opportunityWithSourceIds(sourceIds: string[]) {
+    return {
+      opportunityId: "opp-1",
+      title: "t",
+      description: "d",
+      unservedNeed: { claim: "x", status: "INFERENCE", sourceIds, confidence: "medium", reasoning: "y" },
+      affectedStakeholders: ["farmer"],
+      relatedPains: ["pain-1"],
+      relatedGaps: ["gap-1"],
+      existingSolutionContext: { claim: "x", status: "ASSUMPTION", sourceIds: [], confidence: "medium", reasoning: "y" },
+      whyNow: { factors: [], summary: "s" },
+      impact: [],
+      valuePotential: { value: 60, basis: "ai_estimate", reasoning: "n/a", confidence: "medium" },
+      impactPotential: { value: 55, basis: "ai_estimate", reasoning: "n/a", confidence: "medium" },
+      evidenceClaims: [],
+      confidence: "medium",
+      opportunityState: "PROMISING_OPPORTUNITY",
+    };
+  }
+
+  // The literal production bug, reproduced at the schema-construction
+  // level: the schema built for this call must itself reject a gap id
+  // placed in a sourceIds field — not merely rely on the composer to
+  // catch it after the fact. This is what makes it something Gemini's
+  // own structured output is constrained against emitting, not just
+  // something the composer cleans up afterward.
+  it("builds a schema that rejects a gap id used as a sourceId, the literal GAP-001/GAP-01 production bug", async () => {
+    const provider = fakeProvider({ status: "ok", model: "x", data: validOutput });
+
+    await runOpportunityAgent(context(fullValidUpstream), provider);
+
+    const call = vi.mocked(provider.generateStructured).mock.calls[0]![0];
+    const withGapAsSource = { opportunities: [opportunityWithSourceIds(["gap-1"])] };
+    const withRealSource = { opportunities: [opportunityWithSourceIds(["source-1"])] };
+
+    expect(call.schema.safeParse(withGapAsSource).success).toBe(false);
+    expect(call.schema.safeParse(withRealSource).success).toBe(true);
+  });
+
+  it("builds a schema that rejects an unknown/nonexistent sourceId the same way", async () => {
+    const provider = fakeProvider({ status: "ok", model: "x", data: validOutput });
+
+    await runOpportunityAgent(context(fullValidUpstream), provider);
+
+    const call = vi.mocked(provider.generateStructured).mock.calls[0]![0];
+    expect(call.schema.safeParse({ opportunities: [opportunityWithSourceIds(["ghost-source"])] }).success).toBe(
+      false,
     );
+  });
+
+  it("builds a schema that forces sourceIds empty when Phase 03 found no sources at all", async () => {
+    const provider = fakeProvider({ status: "ok", model: "x", data: validOutput });
+
+    await runOpportunityAgent(
+      context({ ...fullValidUpstream, existingSolutions: { ...validExistingSolutions, sources: [] } }),
+      provider,
+    );
+
+    const call = vi.mocked(provider.generateStructured).mock.calls[0]![0];
+    expect(call.schema.safeParse({ opportunities: [opportunityWithSourceIds(["source-1"])] }).success).toBe(
+      false,
+    );
+    expect(call.schema.safeParse({ opportunities: [opportunityWithSourceIds([])] }).success).toBe(true);
   });
 });

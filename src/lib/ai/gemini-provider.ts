@@ -3,6 +3,7 @@ import "server-only";
 import { ApiError, GoogleGenAI } from "@google/genai";
 import { z } from "zod";
 
+import { constrainSourceIdsInJsonSchema, findUnknownCitedSourceId } from "./source-id-vocabulary";
 import type { AiGenerateParams, AiProvider, AiResult } from "./types";
 
 /**
@@ -122,7 +123,10 @@ export class GeminiProvider implements AiProvider {
   async generateStructured<T>(
     params: AiGenerateParams<T>,
   ): Promise<AiResult<T>> {
-    const jsonSchema = z.toJSONSchema(params.schema, { target: "draft-7" });
+    const baseJsonSchema = z.toJSONSchema(params.schema, { target: "draft-7" });
+    const jsonSchema = params.sourceIdVocabulary
+      ? constrainSourceIdsInJsonSchema(baseJsonSchema, params.sourceIdVocabulary)
+      : baseJsonSchema;
 
     let lastError: unknown;
 
@@ -178,6 +182,21 @@ export class GeminiProvider implements AiProvider {
             message: "Gemini response was not valid JSON.",
             raw: responseText,
           };
+        }
+
+        // The generation-time `enum` constraint above isn't a guarantee —
+        // still check the actual returned value against the real
+        // vocabulary before anything downstream (including the schema
+        // parse below) ever sees it.
+        if (params.sourceIdVocabulary) {
+          const unknownId = findUnknownCitedSourceId(parsedJson, params.sourceIdVocabulary);
+          if (unknownId) {
+            return {
+              status: "invalid_output",
+              message: `Gemini output cited unknown source id "${unknownId}" — not in the real research source list for this call.`,
+              raw: responseText,
+            };
+          }
         }
 
         // Never trust raw model JSON — always re-validate against the

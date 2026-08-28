@@ -6,7 +6,7 @@ import type { PhaseExecutionContext } from "@/lib/orchestrator/types";
 import type { PhaseSource } from "@/lib/agents/research-agent/schema";
 
 import { buildSystemInstruction, buildUserPrompt } from "./prompt";
-import { innovationAgentOutputSchema, type InnovationAgentOutput } from "./schema";
+import { buildDynamicInnovationAgentOutputSchema, type InnovationAgentOutput } from "./schema";
 
 export * from "./schema";
 
@@ -31,10 +31,20 @@ export async function runInnovationAgent(
   sources: PhaseSource[],
   provider: AiProvider = getAiProvider(),
 ): Promise<AiResult<InnovationAgentOutput>> {
-  return provider.generateStructured({
+  const dynamicSchema = buildDynamicInnovationAgentOutputSchema({
+    opportunityIds: opportunities.map((o) => o.opportunityId),
+    sourceIds: sources.map((s) => s.sourceLocalId),
+  });
+
+  const result = await provider.generateStructured({
     systemInstruction: buildSystemInstruction(context.mode, context.criteria),
     prompt: buildUserPrompt(context.problemStatement, opportunities, sources),
-    schema: innovationAgentOutputSchema,
+    schema: dynamicSchema,
     temperature: 0.35,
   });
+
+  // The dynamic schema strictly narrows `InnovationAgentOutput`'s id
+  // fields (each a subset of `string`), so a value that satisfies it
+  // always satisfies the static type too.
+  return result as AiResult<InnovationAgentOutput>;
 }

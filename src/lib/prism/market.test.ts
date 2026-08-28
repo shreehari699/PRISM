@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildIllustrativeValuationScenarioSchema,
+  buildMarketNumberSchema,
   illustrativeValuationScenarioSchema,
   marketNumberSchema,
 } from "./market";
@@ -177,6 +179,109 @@ describe("illustrativeValuationScenarioSchema", () => {
       value: null,
       currency: null,
       reasoning: "Not enough signal to illustrate even a scenario.",
+    });
+    expect(result.success).toBe(true);
+  });
+});
+
+describe("buildMarketNumberSchema (dynamic, generation-time constrained)", () => {
+  it("accepts a real source id and rejects an id outside the supplied list", () => {
+    const schema = buildMarketNumberSchema(["source-1"]);
+    expect(
+      schema.safeParse({
+        status: "VERIFIED",
+        value: 100,
+        unit: "count",
+        currency: null,
+        geography: null,
+        period: null,
+        sourceIds: ["source-1"],
+        confidence: "medium",
+        reasoning: "y",
+      }).success,
+    ).toBe(true);
+    expect(
+      schema.safeParse({
+        status: "INFERENCE",
+        value: null,
+        unit: null,
+        currency: null,
+        geography: null,
+        period: null,
+        sourceIds: ["GAP-01"],
+        confidence: "medium",
+        reasoning: "y",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects a calculation input whose sourceIds cite an id outside the supplied list", () => {
+    const schema = buildMarketNumberSchema(["source-1"]);
+    const result = schema.safeParse({
+      status: "MODEL_ESTIMATE",
+      value: 100,
+      unit: "count",
+      currency: null,
+      geography: null,
+      period: null,
+      sourceIds: [],
+      calculation: {
+        inputs: [{ label: "x", value: 1, unit: "count", sourceIds: ["ghost-source"] }],
+        formula: "x",
+        assumptions: [],
+      },
+      confidence: "medium",
+      reasoning: "y",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("still enforces VERIFIED-requires-a-real-source, same as the static schema", () => {
+    const schema = buildMarketNumberSchema(["source-1"]);
+    const result = schema.safeParse({
+      status: "VERIFIED",
+      value: 100,
+      unit: "count",
+      currency: null,
+      geography: null,
+      period: null,
+      sourceIds: [],
+      confidence: "medium",
+      reasoning: "y",
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("buildIllustrativeValuationScenarioSchema (dynamic, generation-time constrained)", () => {
+  it("rejects a calculation input whose sourceIds cite an id outside the supplied list", () => {
+    const schema = buildIllustrativeValuationScenarioSchema(["source-1"]);
+    const result = schema.safeParse({
+      status: "ILLUSTRATIVE_MODEL_ESTIMATE",
+      value: 500_000_000,
+      currency: "INR",
+      calculation: {
+        inputs: [{ label: "x", value: 1, unit: "count", sourceIds: ["opp-1"] }],
+        formula: "x",
+        assumptions: [],
+      },
+      reasoning: "x",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts a calculation input citing a real source id", () => {
+    const schema = buildIllustrativeValuationScenarioSchema(["source-1"]);
+    const result = schema.safeParse({
+      status: "ILLUSTRATIVE_MODEL_ESTIMATE",
+      value: 500_000_000,
+      currency: "INR",
+      calculation: {
+        inputs: [{ label: "x", value: 1, unit: "count", sourceIds: ["source-1"] }],
+        formula: "x",
+        assumptions: [],
+      },
+      reasoning: "x",
     });
     expect(result.success).toBe(true);
   });

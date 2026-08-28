@@ -8,6 +8,15 @@ export interface AiGenerateParams<T> {
   /** Every structured call must declare and validate its output shape. */
   schema: z.ZodType<T>;
   temperature?: number;
+  /**
+   * The real, complete set of source ids valid for every `sourceIds`
+   * field in `schema`, wherever it appears — a provider that supports it
+   * uses this to constrain generation itself (see
+   * `constrainSourceIdsInJsonSchema`) and to reject a response that
+   * cites an id outside it before `schema` even parses the value. Omit
+   * when the call's schema has no `sourceIds` field to constrain.
+   */
+  sourceIdVocabulary?: readonly string[];
 }
 
 export interface AiUsage {

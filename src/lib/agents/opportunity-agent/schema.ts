@@ -1,6 +1,7 @@
 import { z } from "zod";
 
-import { evidenceStatusSchema, richEvidenceClaimSchema } from "@/lib/prism/evidence";
+import { buildRichEvidenceClaimSchema, evidenceStatusSchema, richEvidenceClaimSchema } from "@/lib/prism/evidence";
+import { idRefArraySchema } from "@/lib/prism/id-refs";
 import { qualitativeLevelSchema, scoreSchema } from "@/lib/prism/scoring";
 
 export const opportunityStateSchema = z.enum([
@@ -93,3 +94,49 @@ export const opportunityAgentOutputSchema = z.object({
   opportunities: z.array(draftOpportunitySchema).default([]),
 });
 export type OpportunityAgentOutput = z.infer<typeof opportunityAgentOutputSchema>;
+
+/**
+ * A generation-time-constrained variant of `opportunityAgentOutputSchema`:
+ * every cross-phase reference field (`affectedStakeholders`,
+ * `relatedPains`, `relatedGaps`, and every `sourceIds`) is a real enum of
+ * the ids that actually exist upstream for this call, not an open
+ * `string[]` the model is merely instructed to respect — see
+ * `idRefArraySchema` for why this constrains Gemini's structured output
+ * itself, not just the prompt. Build this fresh per call from the real
+ * Phase 02/04 ids and parse the result back into the plain
+ * `OpportunityAgentOutput` type; never a substitute for the composer's
+ * own post-generation cross-reference check against the same real data.
+ */
+export function buildDynamicOpportunityAgentOutputSchema(validIds: {
+  stakeholderIds: readonly string[];
+  painIds: readonly string[];
+  gapIds: readonly string[];
+  sourceIds: readonly string[];
+}) {
+  const claimSchema = buildRichEvidenceClaimSchema(validIds.sourceIds);
+
+  const dynamicDraftOpportunitySchema = z.object({
+    opportunityId: z.string().min(1),
+    title: z.string().min(1),
+    description: z.string().min(1),
+    unservedNeed: claimSchema,
+    affectedStakeholders: idRefArraySchema(validIds.stakeholderIds),
+    relatedPains: idRefArraySchema(validIds.painIds),
+    relatedGaps: idRefArraySchema(validIds.gapIds),
+    existingSolutionContext: claimSchema,
+    whyNow: z.object({
+      factors: z.array(whyNowFactorSchema).default([]),
+      summary: z.string().min(1),
+    }),
+    impact: z.array(impactAssessmentEntrySchema).default([]),
+    valuePotential: scoreSchema,
+    impactPotential: scoreSchema,
+    evidenceClaims: z.array(claimSchema).default([]),
+    confidence: qualitativeLevelSchema,
+    opportunityState: opportunityStateSchema,
+  });
+
+  return z.object({
+    opportunities: z.array(dynamicDraftOpportunitySchema).default([]),
+  });
+}

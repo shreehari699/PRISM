@@ -1,7 +1,10 @@
 import { z } from "zod";
 
 import { confidenceLevelSchema } from "@/lib/prism/confidence";
-import { illustrativeValuationScenarioSchema } from "@/lib/prism/market";
+import {
+  buildIllustrativeValuationScenarioSchema,
+  illustrativeValuationScenarioSchema,
+} from "@/lib/prism/market";
 import { qualitativeLevelSchema, scoreSchema } from "@/lib/prism/scoring";
 
 export const capitalIntensityLevelSchema = z.enum(["LOW", "MODERATE", "HIGH", "VERY_HIGH"]);
@@ -108,3 +111,30 @@ export const investmentAgentOutputSchema = z.object({
   consultantMessage: z.string().min(1),
 });
 export type InvestmentAgentOutput = z.infer<typeof investmentAgentOutputSchema>;
+
+/**
+ * A generation-time-constrained variant of `investmentAgentOutputSchema`:
+ * `valuationDrivers.illustrativeScenario.calculation.inputs[].sourceIds`
+ * is a real enum of the ids that actually exist for this call — the
+ * latent instance of the Phase 05 GAP-001 bug class this agent carried
+ * (a reachable `sourceIds` path the model was never shown a real
+ * vocabulary for). Build fresh per call; never a substitute for the
+ * composer's own post-generation cross-reference check.
+ */
+export function buildDynamicInvestmentAgentOutputSchema(validSourceIds: readonly string[]) {
+  return z.object({
+    investmentAnalysis: investmentAnalysisSchema,
+    valuationDrivers: z.object({
+      drivers: z.array(valuationDriverEntrySchema).default([]),
+      illustrativeScenario: buildIllustrativeValuationScenarioSchema(validSourceIds).nullable(),
+    }),
+    investmentRealityCheck: investmentRealityCheckSchema,
+    investmentScores: investmentScoresSchema,
+    confidenceSummary: z.object({
+      overallConfidence: confidenceLevelSchema,
+      narrative: z.string().min(1),
+    }),
+    validationQuestions: z.array(z.string().min(1)).default([]),
+    consultantMessage: z.string().min(1),
+  });
+}

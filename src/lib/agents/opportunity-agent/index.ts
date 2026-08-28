@@ -8,7 +8,7 @@ import { gapIntelligenceAnalysisSchema } from "@/lib/phases/gap-intelligence/sch
 import { stakeholderPainAnalysisSchema } from "@/lib/phases/stakeholder-pain/schema";
 
 import { buildSystemInstruction, buildUserPrompt } from "./prompt";
-import { opportunityAgentOutputSchema, type OpportunityAgentOutput } from "./schema";
+import { buildDynamicOpportunityAgentOutputSchema, type OpportunityAgentOutput } from "./schema";
 
 export * from "./schema";
 
@@ -50,7 +50,14 @@ export async function runOpportunityAgent(
     };
   }
 
-  return provider.generateStructured({
+  const dynamicSchema = buildDynamicOpportunityAgentOutputSchema({
+    stakeholderIds: stakeholderPain.data.stakeholders.map((s) => s.localId),
+    painIds: stakeholderPain.data.painPoints.map((p) => p.localId),
+    gapIds: gapIntelligence.data.gapCandidates.map((g) => g.gapId),
+    sourceIds: existingSolutions.data.sources.map((s) => s.sourceLocalId),
+  });
+
+  const result = await provider.generateStructured({
     systemInstruction: buildSystemInstruction(context.mode, context.criteria),
     prompt: buildUserPrompt(
       problemAnatomy.data,
@@ -58,7 +65,13 @@ export async function runOpportunityAgent(
       existingSolutions.data,
       gapIntelligence.data,
     ),
-    schema: opportunityAgentOutputSchema,
+    schema: dynamicSchema,
     temperature: 0.35,
   });
+
+  // The dynamic schema is a strict narrowing of `OpportunityAgentOutput`
+  // (every id field is a subset of `string`), so a value that satisfies
+  // it always satisfies the static type too — this just restores that
+  // plain, non-call-specific type for downstream code.
+  return result as AiResult<OpportunityAgentOutput>;
 }

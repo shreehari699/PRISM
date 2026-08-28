@@ -12,7 +12,7 @@ import {
   type MarketEvidenceSourceInput,
   type MarketResearchSummary,
 } from "./prompt";
-import { marketAgentOutputSchema, type MarketAgentOutput } from "./schema";
+import { buildDynamicMarketAgentOutputSchema, type MarketAgentOutput } from "./schema";
 
 export * from "./schema";
 
@@ -48,7 +48,9 @@ export async function runMarketAgent(
     };
   }
 
-  return provider.generateStructured({
+  const dynamicSchema = buildDynamicMarketAgentOutputSchema(sources.map((s) => s.sourceLocalId));
+
+  const result = await provider.generateStructured({
     systemInstruction: buildSystemInstruction(context.mode, context.criteria),
     prompt: buildUserPrompt(
       context.problemStatement,
@@ -58,7 +60,12 @@ export async function runMarketAgent(
       sources,
       researchSummary,
     ),
-    schema: marketAgentOutputSchema,
+    schema: dynamicSchema,
     temperature: 0.35,
   });
+
+  // The dynamic schema strictly narrows every sourceIds field to a
+  // subset of `string`, so a value that satisfies it always satisfies
+  // the static `MarketAgentOutput` type too.
+  return result as AiResult<MarketAgentOutput>;
 }
