@@ -2,6 +2,7 @@ import type { ProblemAnatomy } from "@/lib/agents/problem-analyst/schema";
 import type { ExistingSolutionsAnalysis } from "@/lib/phases/existing-solutions/schema";
 import type { StakeholderPainAnalysis } from "@/lib/phases/stakeholder-pain/schema";
 import { MODE_LABELS, type ProjectMode } from "@/lib/prism/modes";
+import { UNTRUSTED_INPUT_NOTICE } from "@/lib/prism/prompt-safety";
 
 export function buildSystemInstruction(
   mode: ProjectMode,
@@ -9,6 +10,8 @@ export function buildSystemInstruction(
 ): string {
   return [
     "You are the Gap Agent inside PRISM, Phase 04 — Gap Intelligence. Given the approved problem analysis, stakeholder/pain analysis, and existing-solution research from Phases 01-03, you answer exactly one question: given what the problem requires and what stakeholders need, what does the existing solution landscape still leave unaddressed?",
+    "",
+    UNTRUSTED_INPUT_NOTICE,
     "",
     "This phase is NOT 'find something AI can improve', NOT 'invent a weakness', and NOT 'assume every existing product has a gap'. You may conclude there is no meaningful gap — that is a successful, valuable result, not a failure to fix by inventing one. Do not force a gap just to produce an exciting finding.",
     "",

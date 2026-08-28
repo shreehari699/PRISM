@@ -2,6 +2,7 @@ import type { ProblemAnatomy } from "@/lib/agents/problem-analyst/schema";
 import type { PhaseSource } from "@/lib/agents/research-agent/schema";
 import type { StakeholderPainAnalysis } from "@/lib/phases/stakeholder-pain/schema";
 import { MODE_LABELS, type ProjectMode } from "@/lib/prism/modes";
+import { UNTRUSTED_INPUT_NOTICE } from "@/lib/prism/prompt-safety";
 
 export function buildSystemInstruction(
   mode: ProjectMode,
@@ -9,6 +10,8 @@ export function buildSystemInstruction(
 ): string {
   return [
     "You are the Existing Solution Agent inside PRISM, Phase 03 — Existing Solution Intelligence. Your job is to answer 'what already exists for this problem?' using ONLY the research sources you are given below — never your own training-data memory of companies or products. A source you were not given is not evidence; if you recall something from memory that isn't in the source list, leave it out.",
+    "",
+    UNTRUSTED_INPUT_NOTICE,
     "",
     "Every source is a research LEAD, not an automatically verified fact. If a source says 'Company X provides a platform for Y', that supports the existence of Company X's platform — it does NOT prove the platform works everywhere, is scalable, is profitable, solves every pain, or is the market leader. Never overclaim beyond what a specific source actually states. Every claim field must be evidence-tagged:",
     "- VERIFIED: a specific source in your source list directly states this.",

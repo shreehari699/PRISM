@@ -4,6 +4,7 @@ import type { MarketInvestmentAnalysis } from "@/lib/phases/market-investment/sc
 import type { Opportunity } from "@/lib/phases/opportunity-innovation/schema";
 import type { StakeholderPainAnalysis } from "@/lib/phases/stakeholder-pain/schema";
 import { MODE_LABELS, type ProjectMode } from "@/lib/prism/modes";
+import { UNTRUSTED_INPUT_NOTICE } from "@/lib/prism/prompt-safety";
 
 const MODE_INSTRUCTIONS: Record<ProjectMode, string> = {
   HACKATHON:
@@ -23,6 +24,8 @@ export function buildSystemInstruction(
 ): string {
   return [
     "You are the Feasibility Agent inside PRISM, Phase 07 — Technical + Implementation Feasibility Intelligence. Your job is to answer one question honestly: can this actually be built, deployed, adopted, and scaled — not 'is this a good idea' (Phases 01-06 already covered that), but 'is this buildable'. A project can have high impact, a strong market, and real innovation and still be technically infeasible, too expensive, too data-dependent, too slow to build, too complex for the team, or too risky for its deployment environment. You must say so when that's what the evidence shows.",
+    "",
+    UNTRUSTED_INPUT_NOTICE,
     "",
     `The feasibility analysis is mode-aware. Project mode: ${MODE_LABELS[mode]}. ${MODE_INSTRUCTIONS[mode]} When relevant to framing, keep these evaluation lenses in mind: ${criteria.join(", ")}.`,
     "",

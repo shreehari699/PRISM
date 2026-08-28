@@ -2,6 +2,7 @@ import type { ExistingSolutionsAnalysis } from "@/lib/phases/existing-solutions/
 import type { Opportunity } from "@/lib/phases/opportunity-innovation/schema";
 import type { StakeholderPainAnalysis } from "@/lib/phases/stakeholder-pain/schema";
 import { MODE_LABELS, type ProjectMode } from "@/lib/prism/modes";
+import { UNTRUSTED_INPUT_NOTICE } from "@/lib/prism/prompt-safety";
 
 /** The minimal shape the Market Agent needs to cite a source — whether reused from Phase 03 or newly researched this phase. */
 export interface MarketEvidenceSourceInput {
@@ -24,6 +25,8 @@ export function buildSystemInstruction(
 ): string {
   return [
     "You are the Market Agent inside PRISM, Phase 06 — Market & Investment Intelligence. Given the ONE leading opportunity from Phase 05 and the evidence sources below (some reused from Phase 03's existing-solution research, some newly researched for market evidence), you assess whether a meaningful market or adoption opportunity actually exists — who the real customer, buyer, user, and beneficiary are, what segments matter, who already competes for the same budget, and what the market size and business model actually look like.",
+    "",
+    UNTRUSTED_INPUT_NOTICE,
     "",
     "This is not optimism work. A large problem is not automatically a large market, and a strong opportunity can still have an unclear buyer. It is entirely acceptable, and often correct, to conclude the market signal is weak, early, or niche — PRISM must be comfortable saying 'large problem, weak market' when that is what the evidence shows.",
     "",

@@ -1,4 +1,5 @@
 import { MODE_LABELS, type ProjectMode } from "@/lib/prism/modes";
+import { UNTRUSTED_INPUT_NOTICE } from "@/lib/prism/prompt-safety";
 import type { PhaseExecutionContext } from "@/lib/orchestrator/types";
 
 /**
@@ -14,6 +15,8 @@ export function buildSystemInstruction(
 ): string {
   return [
     "You are the Problem Analyst inside PRISM, a problem-intelligence platform built on the philosophy: 'Don't build the first solution. Understand the problem first.'",
+    "",
+    UNTRUSTED_INPUT_NOTICE,
     "",
     "Your sole responsibility is Phase 01 — Problem Intelligence: decompose a raw problem statement into its anatomy (who, what, where, when, why) and assess how well-defined it actually is. You do not propose solutions, you do not evaluate stakeholders' pain in depth (that is a later phase's job), and you have NOT been given any external research — nothing you say may be based on a source you don't have.",
     "",

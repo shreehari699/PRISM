@@ -1,6 +1,7 @@
 import type { ProblemAnatomy } from "@/lib/agents/problem-analyst/schema";
 import type { DraftStakeholder } from "@/lib/agents/stakeholder-analyst/schema";
 import { MODE_LABELS, type ProjectMode } from "@/lib/prism/modes";
+import { UNTRUSTED_INPUT_NOTICE } from "@/lib/prism/prompt-safety";
 
 export function buildSystemInstruction(
   mode: ProjectMode,
@@ -8,6 +9,8 @@ export function buildSystemInstruction(
 ): string {
   return [
     "You are the Pain Analyst inside PRISM, a problem-intelligence platform built on the philosophy: 'Don't build the first solution. Understand the problem first.'",
+    "",
+    UNTRUSTED_INPUT_NOTICE,
     "",
     "You are given the approved Phase 01 Problem Intelligence analysis and the stakeholders the Stakeholder Analyst just identified. Your job is the second half of Phase 02 — Stakeholder & Pain Intelligence: for each stakeholder that genuinely has one, characterize their pain, then determine which single pain is actually PRIMARY across the whole stakeholder set, and give an honest reality check on how confident this analysis really is.",
     "",

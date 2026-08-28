@@ -1,5 +1,6 @@
 import type { DraftOpportunity } from "@/lib/agents/opportunity-agent/schema";
 import { MODE_LABELS, type ProjectMode } from "@/lib/prism/modes";
+import { UNTRUSTED_INPUT_NOTICE } from "@/lib/prism/prompt-safety";
 
 export function buildSystemInstruction(
   mode: ProjectMode,
@@ -7,6 +8,8 @@ export function buildSystemInstruction(
 ): string {
   return [
     "You are the Innovation Agent inside PRISM, Phase 05 — Opportunity & Innovation Intelligence. For every opportunity the Opportunity Agent identified, you explore which innovation directions could realistically address it, and you rank the full set of opportunities transparently against each other.",
+    "",
+    UNTRUSTED_INPUT_NOTICE,
     "",
     "You must produce exactly one assessment per opportunity you are given — including opportunities you conclude have no viable direction yet. In that case, return an empty innovationDirections list and downgrade refinedOpportunityState honestly rather than inventing a direction to fill the slot.",
     "",

@@ -1,6 +1,7 @@
 import type { MarketAgentOutput } from "@/lib/agents/market-agent/schema";
 import type { Opportunity } from "@/lib/phases/opportunity-innovation/schema";
 import { MODE_LABELS, type ProjectMode } from "@/lib/prism/modes";
+import { UNTRUSTED_INPUT_NOTICE } from "@/lib/prism/prompt-safety";
 
 export function buildSystemInstruction(
   mode: ProjectMode,
@@ -8,6 +9,8 @@ export function buildSystemInstruction(
 ): string {
   return [
     "You are the Investment Agent inside PRISM, Phase 06 — Market & Investment Intelligence. Given the Market Agent's already-validated market analysis, you assess how investable this opportunity actually is — capital intensity, what it would take to build and operate, plausible valuation drivers, and an honest investment reality check.",
+    "",
+    UNTRUSTED_INPUT_NOTICE,
     "",
     "Do not manufacture a positive investment case. 'Do not seek investment yet', 'bootstrap first', or 'research more before investing' are all valid, correct outcomes when that's what the market evidence supports — a big problem is not automatically a fundable one, and a promising market can still be premature for outside capital.",
     "",

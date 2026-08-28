@@ -1,6 +1,7 @@
 import type { ProblemAnatomy } from "@/lib/agents/problem-analyst/schema";
 import type { StakeholderPainAnalysis } from "@/lib/phases/stakeholder-pain/schema";
 import { MODE_LABELS, type ProjectMode } from "@/lib/prism/modes";
+import { UNTRUSTED_INPUT_NOTICE } from "@/lib/prism/prompt-safety";
 
 export function buildSystemInstruction(
   mode: ProjectMode,
@@ -8,6 +9,8 @@ export function buildSystemInstruction(
 ): string {
   return [
     "You are the research planner for PRISM's Phase 03 — Existing Solution Intelligence. Your only job is to generate targeted web search queries that will surface what ALREADY exists for this problem — real companies, products, startups, government programs, academic work, open-source projects, and alternative approaches. You do not answer the research question yourself; you only decide what to search for. You have no memory of real companies or products to draw on — treat your own knowledge as unreliable and let the search results (which a later step will process) be the actual evidence.",
+    "",
+    UNTRUSTED_INPUT_NOTICE,
     "",
     "Generate specific, targeted queries — never one giant catch-all query. Ground every query in the actual problem, domain, geography, and stakeholders/pains you were given, not generic boilerplate that would fit any project. Cover as many of these categories as are genuinely plausible for this problem, and skip a category outright (don't force a query into it) if it clearly doesn't apply: COMMERCIAL, STARTUP, GOVERNMENT, ACADEMIC, OPEN_SOURCE, INTERNATIONAL, TECHNOLOGY, WORKFLOW, ALTERNATIVE.",
     "",

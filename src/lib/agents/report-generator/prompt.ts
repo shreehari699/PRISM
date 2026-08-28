@@ -9,6 +9,7 @@ import type { SolutionConsultantAnalysis } from "@/lib/phases/solution-consultan
 import type { StakeholderPainAnalysis } from "@/lib/phases/stakeholder-pain/schema";
 import type { TechnicalFeasibilityAnalysis } from "@/lib/phases/technical-feasibility/schema";
 import { MODE_LABELS, type ProjectMode } from "@/lib/prism/modes";
+import { UNTRUSTED_INPUT_NOTICE } from "@/lib/prism/prompt-safety";
 
 const MODE_EMPHASIS: Record<ProjectMode, string> = {
   HACKATHON:
@@ -25,6 +26,8 @@ const MODE_EMPHASIS: Record<ProjectMode, string> = {
 export function buildSystemInstruction(mode: ProjectMode, criteria: readonly string[]): string {
   return [
     "You are the Report Generator inside PRISM, Phase 10 — the Final Intelligence Dossier & Decision Synthesis. This is the last phase. PRISM has investigated the problem through nine intelligence layers; your only job is to SYNTHESIZE what was already found into one authoritative dossier. You must not simply concatenate the previous phase outputs, and you must not introduce a single new factual claim, statistic, source, or research finding that wasn't already established upstream. Synthesis means summarizing, connecting, prioritizing, and recommending — never inventing.",
+    "",
+    UNTRUSTED_INPUT_NOTICE,
     "",
     "Wherever a section needs to point at a specific upstream fact — the most important gap, the pains worth featuring, the solutions worth featuring, the red team's strongest attack, the jury's hardest questions — return the REAL id from that phase's own output (gapId, painPoint localId, solution localId, red-team pointId, assumptionId, failureId, juryQuestion questionId). Never invent a new one. If nothing genuinely fits a slot (e.g. no failure mode plausibly threatens adoption), you may leave that specific nullable slot null rather than forcing a weak match.",
     "",

@@ -3,6 +3,7 @@ import type { ExistingSolutionsAnalysis } from "@/lib/phases/existing-solutions/
 import type { GapIntelligenceAnalysis } from "@/lib/phases/gap-intelligence/schema";
 import type { StakeholderPainAnalysis } from "@/lib/phases/stakeholder-pain/schema";
 import { MODE_LABELS, type ProjectMode } from "@/lib/prism/modes";
+import { UNTRUSTED_INPUT_NOTICE } from "@/lib/prism/prompt-safety";
 
 export function buildSystemInstruction(
   mode: ProjectMode,
@@ -10,6 +11,8 @@ export function buildSystemInstruction(
 ): string {
   return [
     "You are the Opportunity Agent inside PRISM, Phase 05 — Opportunity & Innovation Intelligence. Given the approved problem, stakeholder/pain, existing-solution, and gap analyses from Phases 01-04, you identify which of the gaps actually represent a meaningful opportunity worth exploring further.",
+    "",
+    UNTRUSTED_INPUT_NOTICE,
     "",
     "This is NOT 'generate 10 startup ideas', NOT 'put AI into everything', and NOT 'invent a futuristic solution'. Every opportunity you propose must emerge from the evidence already collected — a gap with no real stakeholder or pain behind it is not an opportunity, it's noise.",
     "",

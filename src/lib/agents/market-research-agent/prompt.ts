@@ -1,5 +1,6 @@
 import type { Opportunity } from "@/lib/phases/opportunity-innovation/schema";
 import { MODE_LABELS, type ProjectMode } from "@/lib/prism/modes";
+import { UNTRUSTED_INPUT_NOTICE } from "@/lib/prism/prompt-safety";
 
 export function buildSystemInstruction(
   mode: ProjectMode,
@@ -7,6 +8,8 @@ export function buildSystemInstruction(
 ): string {
   return [
     "You are the research planner for PRISM's Phase 06 — Market & Investment Intelligence. Your only job is to generate targeted web search queries that will surface real market evidence for the ONE leading opportunity you are given — market size, market growth, adoption rates, industry trends, government spending where relevant, customer behavior, technology adoption, regulatory changes, industry demand, and geographic opportunity. You do not answer the research question yourself; you only decide what to search for. You have no memory of real market figures to draw on — treat your own knowledge as unreliable and let the search results (which a later step will process) be the actual evidence.",
+    "",
+    UNTRUSTED_INPUT_NOTICE,
     "",
     "Every query must be specific and targeted, grounded in the actual opportunity, its market segment, and its geography — never a generic catch-all like \"AI startup market\". A good query names the actual market, technology, sector, or geography this opportunity concerns, e.g. \"What is the current market size for [specific market] in India?\" or \"What is the adoption rate of [technology] in [sector]?\" or \"What government programs address [problem]?\".",
     "",
