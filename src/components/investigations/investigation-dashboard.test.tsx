@@ -1,15 +1,39 @@
 // @vitest-environment jsdom
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { InvestigationDashboard } from "./investigation-dashboard";
-import { VoiceConsultantProvider } from "@/lib/voice/voice-context";
 import type {
   AnalysisSessionRow,
   PhaseStateDTO,
   ProblemStatementRow,
   ProjectRow,
 } from "@/lib/supabase/rows";
+
+const { speakMock } = vi.hoisted(() => ({ speakMock: vi.fn() }));
+
+vi.mock("@/lib/voice/voice-context", () => ({
+  VoiceConsultantProvider: ({ children }: { children: ReactNode }) => children,
+  useVoiceConsultant: () => ({
+    muted: false,
+    toggleMuted: vi.fn(),
+    supported: true,
+    speak: speakMock,
+    stop: vi.fn(),
+  }),
+}));
+
+// Import after the mock so the component under test picks it up.
+const { VoiceConsultantProvider } = await import("@/lib/voice/voice-context");
+
+// Isolates every test from every other test's welcome-narration calls
+// and localStorage "already narrated" markers — both are otherwise
+// shared, mutable state across the whole file.
+afterEach(() => {
+  speakMock.mockClear();
+  localStorage.clear();
+});
 
 const now = new Date().toISOString();
 
@@ -89,13 +113,13 @@ describe("InvestigationDashboard: phase action timeout safety", () => {
       fireEvent.click(screen.getByRole("button", { name: /run this phase/i }));
     });
 
-    // 5 minutes — PHASE_ACTION_TIMEOUT_MS in investigation-dashboard.tsx.
+    // 8 minutes — PHASE_ACTION_TIMEOUT_MS in investigation-dashboard.tsx.
     // The async variant flushes the microtasks the abort → catch → setState
     // chain needs, so the alert is on screen synchronously afterward —
     // real-timer-based `findBy*` polling would otherwise never observe it
     // while fake timers are active.
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+      await vi.advanceTimersByTimeAsync(8 * 60 * 1000);
     });
 
     const alert = screen.getByRole("alert");
@@ -124,5 +148,46 @@ describe("InvestigationDashboard: phase action timeout safety", () => {
 
     expect(await screen.findByText(/approve & continue/i)).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+});
+
+describe("InvestigationDashboard: welcome narration plays once per investigation, not once per mount", () => {
+  it("narrates the welcome on first open of an investigation", () => {
+    renderDashboard();
+    expect(speakMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT replay the welcome narration on a remount of the same investigation — this is what a browser refresh actually does to this component", () => {
+    const first = renderDashboard();
+    expect(speakMock).toHaveBeenCalledTimes(1);
+    speakMock.mockClear();
+
+    // Unmount + fresh render is what happens on refresh: a brand new
+    // component instance with its own fresh `useRef`, backed by the
+    // same persisted localStorage this investigation already used.
+    first.unmount();
+    renderDashboard();
+
+    expect(speakMock).not.toHaveBeenCalled();
+  });
+
+  it("narrates the welcome for a different investigation independently", () => {
+    renderDashboard();
+    expect(speakMock).toHaveBeenCalledTimes(1);
+    speakMock.mockClear();
+
+    render(
+      <VoiceConsultantProvider>
+        <InvestigationDashboard
+          sessionId="session-2"
+          project={project}
+          problemStatement={problemStatement}
+          session={{ ...session, id: "session-2" }}
+          initialPhases={[]}
+        />
+      </VoiceConsultantProvider>,
+    );
+
+    expect(speakMock).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,6 +1,6 @@
 import "server-only";
 
-import { GoogleGenAI } from "@google/genai";
+import { ApiError, GoogleGenAI } from "@google/genai";
 import { z } from "zod";
 
 import type { AiGenerateParams, AiProvider, AiResult } from "./types";
@@ -60,6 +60,54 @@ function looksLikeTimeout(error: unknown): boolean {
   );
 }
 
+/**
+ * A real Phase 02 run hit this directly: Gemini returned
+ * `503 UNAVAILABLE — "currently experiencing high demand"`. That, 429,
+ * and 500/502/504 are all conditions where the *same request* is likely
+ * to succeed moments later — worth a few bounded retries. A 400/401/403
+ * or 404 means the request or configuration itself is wrong; retrying
+ * identically would just fail identically three times slower.
+ */
+const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
+const MAX_ATTEMPTS = 3;
+
+interface ErrorClassification {
+  retryable: boolean;
+  status?: number;
+}
+
+function classifyGenerateError(error: unknown): ErrorClassification {
+  if (error instanceof ApiError) {
+    return { retryable: RETRYABLE_STATUS_CODES.has(error.status), status: error.status };
+  }
+  if (looksLikeTimeout(error)) {
+    return { retryable: true };
+  }
+  if (
+    error instanceof Error &&
+    /network|fetch failed|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ETIMEDOUT/i.test(error.message)
+  ) {
+    return { retryable: true };
+  }
+  return { retryable: false };
+}
+
+/**
+ * Exponential backoff with jitter: attempt 1's failure waits ~1-2s
+ * before attempt 2, attempt 2's failure waits ~2-4s before attempt 3.
+ * Jitter avoids every concurrent request retrying in lockstep against
+ * an already-overloaded backend.
+ */
+function backoffDelayMs(attemptNumber: number): number {
+  const base = 1000 * 2 ** (attemptNumber - 1);
+  const jitter = base * (0.5 + Math.random() * 0.5);
+  return Math.round(base + jitter);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export class GeminiProvider implements AiProvider {
   readonly name = "gemini";
   private readonly client: GoogleGenAI;
@@ -76,107 +124,150 @@ export class GeminiProvider implements AiProvider {
   ): Promise<AiResult<T>> {
     const jsonSchema = z.toJSONSchema(params.schema, { target: "draft-7" });
 
-    let responseText: string | undefined;
-    const requestStartedAt = Date.now();
+    let lastError: unknown;
 
-    try {
-      const response = await this.client.models.generateContent({
-        model: this.model,
-        contents: params.prompt,
-        config: {
-          systemInstruction: params.systemInstruction,
-          temperature: params.temperature ?? 0.4,
-          responseMimeType: "application/json",
-          responseJsonSchema: jsonSchema,
-          httpOptions: { timeout: REQUEST_TIMEOUT_MS },
-          thinkingConfig: { thinkingBudget: THINKING_BUDGET_TOKENS },
-        },
-      });
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      const requestStartedAt = Date.now();
 
-      // Model/timing only — never the prompt, schema, or key.
-      console.log(
-        JSON.stringify({
-          scope: "gemini-provider",
-          model: this.model,
-          ms: Date.now() - requestStartedAt,
-          ok: true,
-        }),
-      );
-
-      responseText = response.text;
-
-      if (!responseText) {
-        const blockReason = response.promptFeedback?.blockReason;
-        return {
-          status: "error",
-          message: blockReason
-            ? `Gemini blocked the response (${blockReason}).`
-            : "Gemini returned an empty response.",
-        };
-      }
-
-      let parsedJson: unknown;
       try {
-        parsedJson = JSON.parse(responseText);
-      } catch {
-        return {
-          status: "invalid_output",
-          message: "Gemini response was not valid JSON.",
-          raw: responseText,
-        };
-      }
-
-      // Never trust raw model JSON — always re-validate against the
-      // schema the caller actually needs, even though we asked the model
-      // to conform to it.
-      const validated = params.schema.safeParse(parsedJson);
-      if (!validated.success) {
-        return {
-          status: "invalid_output",
-          message: `Gemini output failed schema validation: ${validated.error.message}`,
-          raw: responseText,
-        };
-      }
-
-      return {
-        status: "ok",
-        data: validated.data,
-        model: this.model,
-        usage: response.usageMetadata
-          ? {
-              promptTokens: response.usageMetadata.promptTokenCount,
-              responseTokens: response.usageMetadata.candidatesTokenCount,
-              totalTokens: response.usageMetadata.totalTokenCount,
-            }
-          : undefined,
-      };
-    } catch (error) {
-      console.log(
-        JSON.stringify({
-          scope: "gemini-provider",
+        const response = await this.client.models.generateContent({
           model: this.model,
-          ms: Date.now() - requestStartedAt,
-          ok: false,
-        }),
-      );
+          contents: params.prompt,
+          config: {
+            systemInstruction: params.systemInstruction,
+            temperature: params.temperature ?? 0.4,
+            responseMimeType: "application/json",
+            responseJsonSchema: jsonSchema,
+            httpOptions: { timeout: REQUEST_TIMEOUT_MS },
+            thinkingConfig: { thinkingBudget: THINKING_BUDGET_TOKENS },
+          },
+        });
 
-      if (looksLikeTimeout(error)) {
+        // Model/timing/attempt only — never the prompt, schema, or key.
+        console.log(
+          JSON.stringify({
+            scope: "gemini-provider",
+            model: this.model,
+            attempt,
+            maxAttempts: MAX_ATTEMPTS,
+            ms: Date.now() - requestStartedAt,
+            ok: true,
+          }),
+        );
+
+        const responseText = response.text;
+
+        if (!responseText) {
+          const blockReason = response.promptFeedback?.blockReason;
+          // A blocked/empty response is deterministic for this input —
+          // retrying the identical request won't change the outcome.
+          return {
+            status: "error",
+            message: blockReason
+              ? `Gemini blocked the response (${blockReason}).`
+              : "Gemini returned an empty response.",
+          };
+        }
+
+        let parsedJson: unknown;
+        try {
+          parsedJson = JSON.parse(responseText);
+        } catch {
+          return {
+            status: "invalid_output",
+            message: "Gemini response was not valid JSON.",
+            raw: responseText,
+          };
+        }
+
+        // Never trust raw model JSON — always re-validate against the
+        // schema the caller actually needs, even though we asked the model
+        // to conform to it.
+        const validated = params.schema.safeParse(parsedJson);
+        if (!validated.success) {
+          return {
+            status: "invalid_output",
+            message: `Gemini output failed schema validation: ${validated.error.message}`,
+            raw: responseText,
+          };
+        }
+
         return {
-          status: "error",
-          message: `Gemini request timed out after ${REQUEST_TIMEOUT_MS / 1000}s.`,
+          status: "ok",
+          data: validated.data,
+          model: this.model,
+          usage: response.usageMetadata
+            ? {
+                promptTokens: response.usageMetadata.promptTokenCount,
+                responseTokens: response.usageMetadata.candidatesTokenCount,
+                totalTokens: response.usageMetadata.totalTokenCount,
+              }
+            : undefined,
         };
+      } catch (error) {
+        lastError = error;
+        const classification = classifyGenerateError(error);
+
+        console.log(
+          JSON.stringify({
+            scope: "gemini-provider",
+            model: this.model,
+            attempt,
+            maxAttempts: MAX_ATTEMPTS,
+            ms: Date.now() - requestStartedAt,
+            ok: false,
+            status: classification.status,
+            retryable: classification.retryable,
+          }),
+        );
+
+        const message = error instanceof Error ? error.message : String(error);
+        if (looksLikeModelUnavailable(message)) {
+          // A wrong/retired model id will never succeed on retry.
+          return {
+            status: "unavailable",
+            reason: `Configured model "${this.model}" is unavailable: ${message}`,
+          };
+        }
+
+        if (!classification.retryable || attempt === MAX_ATTEMPTS) {
+          break;
+        }
+
+        await sleep(backoffDelayMs(attempt));
       }
-
-      const message = error instanceof Error ? error.message : String(error);
-
-      if (looksLikeModelUnavailable(message)) {
-        return {
-          status: "unavailable",
-          reason: `Configured model "${this.model}" is unavailable: ${message}`,
-        };
-      }
-
-      return { status: "error", message };
     }
+
+    return this.finalFailureResult(lastError);
+  }
+
+  /**
+   * Reached only once every retry attempt is exhausted. Builds a clean,
+   * human-readable message — never the SDK's raw error body — so the UI
+   * never has to render a JSON blob as the primary failure experience.
+   * Never returns an "ok"/"invalid_output" variant, so this is safely
+   * assignable to `AiResult<T>` for whatever `T` the caller needs
+   * without itself being generic.
+   */
+  private finalFailureResult(
+    error: unknown,
+  ): { status: "error"; message: string } | { status: "unavailable"; reason: string } {
+    if (looksLikeTimeout(error)) {
+      return {
+        status: "error",
+        message: `Gemini request timed out after ${MAX_ATTEMPTS} attempt(s) (${REQUEST_TIMEOUT_MS / 1000}s each).`,
+      };
+    }
+
+    const classification = classifyGenerateError(error);
+    if (classification.retryable) {
+      return {
+        status: "unavailable",
+        reason: `Gemini is temporarily unavailable after ${MAX_ATTEMPTS} attempts (provider returned HTTP ${classification.status ?? "an error"}). Please retry.`,
+      };
+    }
+
+    const message = error instanceof Error ? error.message : String(error);
+    return { status: "error", message };
   }
 }

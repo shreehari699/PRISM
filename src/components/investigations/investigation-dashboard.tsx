@@ -11,6 +11,7 @@ import type { PhaseAction } from "@/lib/services/phase-engine";
 import type { AnalysisSessionRow, PhaseStateDTO, ProblemStatementRow, ProjectRow } from "@/lib/supabase/rows";
 import { discoveryDialogue, phaseTransitionDialogue, welcomeDialogue } from "@/lib/voice/dialogue";
 import { useVoiceConsultant } from "@/lib/voice/voice-context";
+import { hasWelcomeNarrationPlayed, markWelcomeNarrationPlayed } from "@/lib/voice/welcome-narration-store";
 
 /**
  * Every phase action is a single request/response round trip — there's
@@ -19,10 +20,18 @@ import { useVoiceConsultant } from "@/lib/voice/voice-context";
  * provider or the network genuinely hangs. The server side already
  * bounds each Gemini call (see gemini-provider.ts), but this is a
  * second, independent backstop: if it fires, the user sees a real,
- * retryable error instead of a frozen page. 5 minutes comfortably
- * covers even a multi-agent phase's worst ordinary case.
+ * retryable error instead of a frozen page.
+ *
+ * Must safely exceed Gemini's own worst case: up to 3 attempts at 120s
+ * each plus backoff between them (gemini-provider.ts) is ~370s alone,
+ * before Supabase/Tavily legs are even counted. 5 minutes used to be
+ * comfortable margin before retries existed; it no longer is — a
+ * legitimate retry sequence could now exceed it, causing the client to
+ * give up and report a false timeout while the server keeps working,
+ * which is exactly the "must refresh to see the real result" bug this
+ * is meant to prevent. 8 minutes restores real margin.
  */
-const PHASE_ACTION_TIMEOUT_MS = 5 * 60 * 1000;
+const PHASE_ACTION_TIMEOUT_MS = 8 * 60 * 1000;
 
 export function InvestigationDashboard({
   sessionId,
@@ -47,12 +56,19 @@ export function InvestigationDashboard({
   React.useEffect(() => {
     if (spokenWelcome.current) return;
     spokenWelcome.current = true;
+    // Welcome narration greets a user starting THIS investigation for
+    // the first time — not every time its page happens to (re)mount.
+    // Without this check, refreshing an in-progress investigation, or
+    // simply navigating back to it, replayed the generic welcome over
+    // whatever phase content the user actually had open.
+    if (hasWelcomeNarrationPlayed(sessionId)) return;
+    markWelcomeNarrationPlayed(sessionId);
     speak(welcomeDialogue(problemStatement.raw_text));
     // Runs once per dashboard mount — deliberately excludes `speak` (stable
     // per-render identity from context, not a dependency the effect needs
     // to react to) so navigating between phases doesn't re-trigger it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [problemStatement.raw_text]);
+  }, [sessionId, problemStatement.raw_text]);
 
   const uiStates = React.useMemo(() => {
     const record = {} as Record<PrismPhaseKey, ReturnType<typeof deriveUiPhaseState>>;

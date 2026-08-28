@@ -3,10 +3,19 @@ import { z } from "zod";
 
 const generateContentMock = vi.fn();
 
+class MockApiError extends Error {
+  status: number;
+  constructor(info: { message: string; status: number }) {
+    super(info.message);
+    this.status = info.status;
+  }
+}
+
 vi.mock("@google/genai", () => ({
   GoogleGenAI: vi.fn().mockImplementation(function GoogleGenAIMock() {
     return { models: { generateContent: generateContentMock } };
   }),
+  ApiError: MockApiError,
 }));
 
 const { GeminiProvider } = await import("./gemini-provider");
@@ -135,10 +144,105 @@ describe("GeminiProvider.generateStructured", () => {
     expect(call.config.httpOptions.timeout).toBeGreaterThan(0);
   });
 
-  it("returns a distinct timeout error (never 'unavailable') when the request's own timeout fires", async () => {
-    const abortError = new Error("The operation timed out.");
-    abortError.name = "AbortError";
-    generateContentMock.mockRejectedValue(abortError);
+  it("returns a distinct timeout error (never 'unavailable') once retries are exhausted", async () => {
+    vi.useFakeTimers();
+    try {
+      const abortError = new Error("The operation timed out.");
+      abortError.name = "AbortError";
+      generateContentMock.mockRejectedValue(abortError);
+
+      const provider = new GeminiProvider("test-key", "gemini-3.6-flash");
+      const resultPromise = provider.generateStructured({
+        systemInstruction: "sys",
+        prompt: "prompt",
+        schema,
+      });
+
+      // A timeout is retried like any other transient failure — flush
+      // both backoff delays between the 3 attempts.
+      await vi.runAllTimersAsync();
+      const result = await resultPromise;
+
+      expect(result.status).toBe("error");
+      if (result.status === "error") {
+        expect(result.message).toMatch(/timed out/i);
+        expect(result.message).toMatch(/3 attempt/i);
+      }
+      expect(generateContentMock).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retries a 503 and succeeds once the provider recovers, without ever surfacing the transient failure to the caller", async () => {
+    vi.useFakeTimers();
+    try {
+      generateContentMock
+        .mockRejectedValueOnce(
+          new MockApiError({
+            status: 503,
+            message: "The model is currently experiencing high demand.",
+          }),
+        )
+        .mockResolvedValueOnce({
+          text: JSON.stringify({ problemSummary: "ok", severity: 40 }),
+        });
+
+      const provider = new GeminiProvider("test-key", "gemini-3.6-flash");
+      const resultPromise = provider.generateStructured({
+        systemInstruction: "sys",
+        prompt: "prompt",
+        schema,
+      });
+
+      await vi.runAllTimersAsync();
+      const result = await resultPromise;
+
+      expect(result.status).toBe("ok");
+      expect(generateContentMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("exhausts retries on a persistent 503 and returns a clean, human-readable message — never the raw provider error body", async () => {
+    vi.useFakeTimers();
+    try {
+      generateContentMock.mockRejectedValue(
+        new MockApiError({
+          status: 503,
+          message:
+            '{"error":{"code":503,"message":"The model is currently experiencing high demand. Spikes in demand are usually temporary.","status":"UNAVAILABLE"}}',
+        }),
+      );
+
+      const provider = new GeminiProvider("test-key", "gemini-3.6-flash");
+      const resultPromise = provider.generateStructured({
+        systemInstruction: "sys",
+        prompt: "prompt",
+        schema,
+      });
+
+      await vi.runAllTimersAsync();
+      const result = await resultPromise;
+
+      expect(generateContentMock).toHaveBeenCalledTimes(3);
+      expect(result.status).toBe("unavailable");
+      if (result.status === "unavailable") {
+        expect(result.reason).toMatch(/temporarily unavailable/i);
+        expect(result.reason).toMatch(/3 attempts/);
+        expect(result.reason).not.toContain("{");
+        expect(result.reason).not.toContain("UNAVAILABLE");
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("never retries a non-retryable status like 401 — retrying an auth failure identically would only waste time", async () => {
+    generateContentMock.mockRejectedValue(
+      new MockApiError({ status: 401, message: "API key not valid." }),
+    );
 
     const provider = new GeminiProvider("test-key", "gemini-3.6-flash");
     const result = await provider.generateStructured({
@@ -147,10 +251,8 @@ describe("GeminiProvider.generateStructured", () => {
       schema,
     });
 
+    expect(generateContentMock).toHaveBeenCalledTimes(1);
     expect(result.status).toBe("error");
-    if (result.status === "error") {
-      expect(result.message).toMatch(/timed out/i);
-    }
   });
 
   it("reports a blocked prompt as an error rather than an empty success", async () => {
