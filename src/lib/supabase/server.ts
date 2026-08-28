@@ -6,6 +6,7 @@ import { createServerClient } from "@supabase/ssr";
 import { getClientEnv } from "@/lib/config/env.client";
 
 import type { Database } from "./database.types";
+import { createTimeoutFetch } from "./fetch-with-timeout";
 
 async function cookieAdapter() {
   const cookieStore = await cookies();
@@ -46,7 +47,7 @@ export async function createClient() {
   return createServerClient<Database>(
     env.NEXT_PUBLIC_SUPABASE_URL,
     env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
-    { cookies: await cookieAdapter() },
+    { cookies: await cookieAdapter(), global: { fetch: createTimeoutFetch() } },
   );
 }
 
@@ -64,6 +65,6 @@ export async function createUntypedClient() {
   return createServerClient(
     env.NEXT_PUBLIC_SUPABASE_URL,
     env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
-    { cookies: await cookieAdapter() },
+    { cookies: await cookieAdapter(), global: { fetch: createTimeoutFetch() } },
   );
 }

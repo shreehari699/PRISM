@@ -21,6 +21,34 @@ import { fail, ok, type ServiceResult } from "./result";
 
 export type PhaseAction = "run" | "approve" | "regenerate";
 
+/**
+ * Server-only timing trail for a phase run — never logs a payload,
+ * header, or secret, only which step ran, how long it took, and whether
+ * it succeeded. Exists so a hang like "stuck on Investigating..." can be
+ * diagnosed from server logs (which of fetchContext / start-running-write
+ * / the agent itself / final persistence is the slow or stuck one)
+ * instead of guessed at from the browser, where none of this is visible.
+ */
+async function timedStep<T>(
+  phaseKey: string,
+  step: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const startedAt = Date.now();
+  try {
+    const result = await fn();
+    console.log(
+      JSON.stringify({ scope: "phase-engine", phaseKey, step, ms: Date.now() - startedAt, ok: true }),
+    );
+    return result;
+  } catch (error) {
+    console.log(
+      JSON.stringify({ scope: "phase-engine", phaseKey, step, ms: Date.now() - startedAt, ok: false }),
+    );
+    throw error;
+  }
+}
+
 interface PhaseEngineParams {
   /** User-scoped client — every read goes through this so RLS decides what's visible. */
   supabase: DbClient;
@@ -299,33 +327,42 @@ async function runOrRegenerate(
 
   const nextVersion = existing ? existing.version + 1 : 1;
 
-  const runningPhase = await upsertRunningPhase(params.admin, {
-    existingId: existing?.id,
-    sessionId: params.sessionId,
-    projectId: context.project.id,
-    phaseKey: params.phaseKey,
-    version: nextVersion,
-  });
+  const runningPhase = await timedStep(params.phaseKey, "start_running_write", () =>
+    upsertRunningPhase(params.admin, {
+      existingId: existing?.id,
+      sessionId: params.sessionId,
+      projectId: context.project.id,
+      phaseKey: params.phaseKey,
+      version: nextVersion,
+    }),
+  );
   if (!runningPhase.ok) return runningPhase;
 
   const executionContext = orchestrator.buildExecutionContext(params.phaseKey);
   const provider = params.aiProvider ?? getAiProvider();
-  const result = await executor.execute(executionContext, provider);
+  const result = await timedStep(params.phaseKey, "agent_execute", () =>
+    executor.execute(executionContext, provider),
+  );
 
   const tokensUsed = result.status === "ok" ? (result.usage?.totalTokens ?? 0) : 0;
   await recordUsage(params.userId, "ai", tokensUsed);
 
   if (result.status === "ok") {
-    const { data: updatedRow, error: updateError } = await params.admin
-      .from("analysis_phases")
-      .update({
-        status: "awaiting_approval",
-        output_data: result.data,
-        error_message: null,
-      })
-      .eq("id", runningPhase.data.id)
-      .select()
-      .maybeSingle();
+    const { data: updatedRow, error: updateError } = await timedStep(
+      params.phaseKey,
+      "persist_result",
+      async () =>
+        await params.admin
+          .from("analysis_phases")
+          .update({
+            status: "awaiting_approval",
+            output_data: result.data,
+            error_message: null,
+          })
+          .eq("id", runningPhase.data.id)
+          .select()
+          .maybeSingle(),
+    );
 
     if (updateError || !updatedRow) {
       return fail(
@@ -427,7 +464,9 @@ export async function executePhaseAction(
     return fail("invalid_input", `Unknown phase key: ${params.phaseKey}`);
   }
 
-  const context = await fetchContext(params.supabase, params.sessionId);
+  const context = await timedStep(params.phaseKey, "fetch_context", () =>
+    fetchContext(params.supabase, params.sessionId),
+  );
   if (!context.ok) return context;
 
   switch (params.action) {

@@ -40,6 +40,7 @@ export class TavilyResearchProvider implements ResearchProvider {
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const requestStartedAt = Date.now();
 
     try {
       const response = await fetch(TAVILY_ENDPOINT, {
@@ -53,6 +54,15 @@ export class TavilyResearchProvider implements ResearchProvider {
         }),
         signal: controller.signal,
       });
+
+      // Timing/status only — never the query text or key.
+      console.log(
+        JSON.stringify({
+          scope: "tavily-provider",
+          ms: Date.now() - requestStartedAt,
+          httpStatus: response.status,
+        }),
+      );
 
       if (!response.ok) {
         return {

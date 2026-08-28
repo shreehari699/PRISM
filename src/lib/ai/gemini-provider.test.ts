@@ -101,6 +101,23 @@ describe("GeminiProvider.generateStructured", () => {
     expect(result.status).toBe("error");
   });
 
+  it("bounds every request's thinking budget, so a reasoning-heavy model can't spend unbounded time 'thinking' before ever producing output", async () => {
+    generateContentMock.mockResolvedValue({
+      text: JSON.stringify({ problemSummary: "ok", severity: 10 }),
+    });
+
+    const provider = new GeminiProvider("test-key", "gemini-3.6-flash");
+    await provider.generateStructured({
+      systemInstruction: "sys",
+      prompt: "prompt",
+      schema,
+    });
+
+    const [[call]] = generateContentMock.mock.calls;
+    expect(call.config.thinkingConfig?.thinkingBudget).toEqual(expect.any(Number));
+    expect(call.config.thinkingConfig.thinkingBudget).toBeGreaterThan(0);
+  });
+
   it("bounds every request with an explicit HTTP timeout, so a hung backend can never leave a phase running forever", async () => {
     generateContentMock.mockResolvedValue({
       text: JSON.stringify({ problemSummary: "ok", severity: 10 }),

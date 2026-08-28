@@ -6,6 +6,7 @@ import { getClientEnv } from "@/lib/config/env.client";
 import { getServerEnv } from "@/lib/config/env.server";
 
 import type { Database } from "./database.types";
+import { createTimeoutFetch } from "./fetch-with-timeout";
 
 /**
  * Service-role Supabase client. This BYPASSES Row Level Security
@@ -30,6 +31,7 @@ export function createAdminClient() {
         autoRefreshToken: false,
         persistSession: false,
       },
+      global: { fetch: createTimeoutFetch() },
     },
   );
 }
@@ -55,6 +57,7 @@ export function createUntypedAdminClient() {
         autoRefreshToken: false,
         persistSession: false,
       },
+      global: { fetch: createTimeoutFetch() },
     },
   );
 }

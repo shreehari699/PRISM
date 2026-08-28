@@ -31,6 +31,28 @@ function looksLikeModelUnavailable(message: string): boolean {
  */
 const REQUEST_TIMEOUT_MS = 120_000;
 
+/**
+ * A live diagnostic call against the real configured model
+ * (gemini-3.7-flash) with the actual Problem Analyst schema — not a toy
+ * prompt — ran for the full 120s timeout above and never returned so
+ * much as a partial response. The trivial "reply with two fields" smoke
+ * test from an earlier session returned in ~2s but reported 139 hidden
+ * "thinking" tokens against a 26-token prompt: a >5x thinking-to-prompt
+ * ratio. Left on its API default ("AUTOMATIC" budget, i.e. the model
+ * decides how much to think), a model that reasons that heavily can
+ * spend an unbounded amount of time reasoning over a large, real
+ * structured-output schema before ever emitting output — this is far
+ * more consistent with the hang than a network stall would be, since a
+ * genuinely stuck connection fails fast on the proxy in this
+ * environment, not silently for two minutes straight.
+ *
+ * Explicitly bounding the thinking budget (rather than disabling
+ * thinking outright, which would blunt the analysis quality PRISM's
+ * value depends on) keeps generation time predictable without
+ * sacrificing reasoning depth for a phase this size.
+ */
+const THINKING_BUDGET_TOKENS = 8192;
+
 function looksLikeTimeout(error: unknown): boolean {
   return (
     error instanceof Error &&
@@ -55,6 +77,7 @@ export class GeminiProvider implements AiProvider {
     const jsonSchema = z.toJSONSchema(params.schema, { target: "draft-7" });
 
     let responseText: string | undefined;
+    const requestStartedAt = Date.now();
 
     try {
       const response = await this.client.models.generateContent({
@@ -66,8 +89,19 @@ export class GeminiProvider implements AiProvider {
           responseMimeType: "application/json",
           responseJsonSchema: jsonSchema,
           httpOptions: { timeout: REQUEST_TIMEOUT_MS },
+          thinkingConfig: { thinkingBudget: THINKING_BUDGET_TOKENS },
         },
       });
+
+      // Model/timing only — never the prompt, schema, or key.
+      console.log(
+        JSON.stringify({
+          scope: "gemini-provider",
+          model: this.model,
+          ms: Date.now() - requestStartedAt,
+          ok: true,
+        }),
+      );
 
       responseText = response.text;
 
@@ -117,6 +151,15 @@ export class GeminiProvider implements AiProvider {
           : undefined,
       };
     } catch (error) {
+      console.log(
+        JSON.stringify({
+          scope: "gemini-provider",
+          model: this.model,
+          ms: Date.now() - requestStartedAt,
+          ok: false,
+        }),
+      );
+
       if (looksLikeTimeout(error)) {
         return {
           status: "error",
