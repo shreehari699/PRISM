@@ -466,6 +466,95 @@ describe("executePhaseAction: run", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBe("unavailable");
   });
+
+  // Goal: Gemini HTTP 429 must classify distinctly from a generic 5xx
+  // "unavailable" — as its own typed, recoverable "rate_limited" code —
+  // and must never leave the phase stuck "running".
+  it("reports rate_limited (not unavailable or a generic error) when the provider is rate-limited, with a clean message", async () => {
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [rows([])],
+    });
+    const admin = createMockDb({
+      analysis_phases: [row(phaseRow({ status: "running" })), noRow],
+    });
+    const provider = fakeProvider({
+      status: "rate_limited",
+      message: "Gemini is rate-limited (HTTP 429) after 3 attempts.",
+      retryAfterMs: 3000,
+    });
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "problem_intelligence",
+      action: "run",
+      aiProvider: provider,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("rate_limited");
+      expect(result.message).toMatch(/rate-limited/i);
+      // Never a raw provider error body — a clean, typed message only.
+      expect(result.message).not.toContain("RESOURCE_EXHAUSTED");
+    }
+
+    // The phase must land in a terminal, retryable "failed" state, not
+    // stay stuck "running" — the second admin write (`noRow`) is exactly
+    // that failure-marking update.
+    const analysisPhaseCalls = (
+      admin.from as unknown as ReturnType<typeof vi.fn>
+    ).mock.calls.filter((call: unknown[]) => call[0] === "analysis_phases");
+    expect(analysisPhaseCalls).toHaveLength(2);
+  });
+
+  // Goal 20's audit: `executor.execute()` is expected to catch its own
+  // failures and return a typed AiResult, never throw — but if it ever
+  // did (a composer bug, a provider exception escaping its own retry
+  // loop), the phase must still land in "failed", not stay "running"
+  // forever with no route-level catch to save it.
+  it("marks the phase failed instead of leaving it stuck running when the agent throws unexpectedly", async () => {
+    const supabase = createMockDb({
+      analysis_sessions: [row(sessionRow)],
+      projects: [row(projectRow)],
+      problem_statements: [row(problemStatementRow)],
+      analysis_phases: [rows([])],
+    });
+    const admin = createMockDb({
+      analysis_phases: [row(phaseRow({ status: "running" })), noRow],
+    });
+    const provider: AiProvider = {
+      name: "fake",
+      model: "fake-model",
+      generateStructured: vi.fn().mockRejectedValue(new Error("unexpected provider exception")),
+    };
+
+    const result = await executePhaseAction({
+      supabase,
+      admin,
+      userId: "user-1",
+      sessionId: "session-1",
+      phaseKey: "problem_intelligence",
+      action: "run",
+      aiProvider: provider,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.code).toBe("error");
+      expect(result.message).toMatch(/unexpected provider exception/);
+    }
+
+    const analysisPhaseCalls = (
+      admin.from as unknown as ReturnType<typeof vi.fn>
+    ).mock.calls.filter((call: unknown[]) => call[0] === "analysis_phases");
+    expect(analysisPhaseCalls).toHaveLength(2);
+  });
 });
 
 describe("executePhaseAction: concurrent run-start race safety", () => {

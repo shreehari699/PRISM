@@ -177,6 +177,98 @@ describe("InvestigationDashboard: phase failure errors are humanized, not shown 
   });
 });
 
+describe("InvestigationDashboard: 429 rate-limit recovery", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("shows the friendly rate-limited message, not the raw provider error, and keeps the phase retryable", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      json: async () => ({
+        error: "Gemini is rate-limited (HTTP 429) after 3 attempts.",
+      }),
+    }) as unknown as typeof fetch;
+
+    renderDashboard();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /run this phase/i }));
+    });
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent(/AI provider is temporarily rate-limited/i);
+    expect(alert).toHaveTextContent(/try again shortly/i);
+    // Never implies the phase's own analysis was invalid.
+    expect(alert).not.toHaveTextContent(/analysis.*invalid/i);
+  });
+
+  it("disables the action button right after a rate-limited failure, then re-enables it on its own once the cooldown elapses — no refresh, no user action required", async () => {
+    vi.useFakeTimers();
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      json: async () => ({ error: "Gemini is rate-limited (HTTP 429) after 3 attempts." }),
+    }) as unknown as typeof fetch;
+
+    renderDashboard();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /run this phase/i }));
+    });
+
+    expect(screen.getByRole("button", { name: /run this phase/i })).toBeDisabled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+
+    expect(screen.getByRole("button", { name: /run this phase/i })).not.toBeDisabled();
+  });
+
+  it("recovers into a completed phase on the next attempt without a page refresh", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({ error: "Gemini is rate-limited (HTTP 429) after 3 attempts." }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          phaseKey: "problem_intelligence",
+          status: "awaiting_approval",
+          version: 1,
+          outputData: { restatement: "ok" },
+          errorMessage: null,
+          approvedAt: null,
+          updatedAt: now,
+        }),
+      });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    renderDashboard();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /run this phase/i }));
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent(/rate-limited/i);
+
+    // The cooldown must lift on its own — no refresh, no manual reset.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    vi.useRealTimers(); // findBy*'s internal polling needs real timers.
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /run this phase/i }));
+    });
+
+    expect(await screen.findByText(/approve & continue/i)).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+});
+
 describe("InvestigationDashboard: phase-open narration follows real navigation", () => {
   it("narrates a phase's own real title and description the first time it's opened via the stepper", () => {
     renderDashboard();

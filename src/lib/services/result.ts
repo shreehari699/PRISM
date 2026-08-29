@@ -11,6 +11,7 @@ export type ServiceErrorCode =
   | "invalid_input"
   | "conflict"
   | "unavailable"
+  | "rate_limited"
   | "not_implemented"
   | "error";
 
@@ -41,6 +42,8 @@ export function toHttpStatus(code: ServiceErrorCode): number {
       return 409;
     case "unavailable":
       return 503;
+    case "rate_limited":
+      return 429;
     case "not_implemented":
       return 501;
     case "error":

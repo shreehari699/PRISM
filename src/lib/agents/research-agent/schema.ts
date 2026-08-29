@@ -90,4 +90,5 @@ export type ResearchAgentResult =
     }
   | { status: "invalid_output"; message: string; raw: string }
   | { status: "unavailable"; reason: string }
-  | { status: "error"; message: string };
+  | { status: "error"; message: string }
+  | { status: "rate_limited"; message: string; retryAfterMs?: number };

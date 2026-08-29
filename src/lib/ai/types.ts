@@ -34,7 +34,16 @@ export type AiResult<T> =
   | { status: "ok"; data: T; model: string; usage?: AiUsage }
   | { status: "unavailable"; reason: string }
   | { status: "invalid_output"; message: string; raw: string }
-  | { status: "error"; message: string };
+  | { status: "error"; message: string }
+  /**
+   * Distinct from generic "unavailable" 5xx failures: the provider
+   * explicitly returned HTTP 429 and stayed rate-limited through every
+   * bounded retry. `retryAfterMs` is set only when the provider itself
+   * supplied a retry delay (never a guessed/invented value) — callers
+   * that can honor it (e.g. a client-side retry cooldown) should prefer
+   * it over their own default backoff.
+   */
+  | { status: "rate_limited"; message: string; retryAfterMs?: number };
 
 export interface AiProvider {
   readonly name: string;

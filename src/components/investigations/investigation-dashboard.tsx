@@ -5,6 +5,7 @@ import * as React from "react";
 import { PhaseErrorAlert } from "@/components/investigations/phase-error-alert";
 import { PhaseRunner } from "@/components/investigations/phase-runner";
 import { PhaseStepper } from "@/components/investigations/phase-stepper";
+import { isRateLimitedMessage } from "@/lib/prism/error-messages";
 import { getPhaseDefinition, nextPhase, PHASE_KEYS, type PrismPhaseKey } from "@/lib/prism/phases";
 import { deriveUiPhaseState } from "@/lib/prism/ui-phase-state";
 import type { PhaseAction } from "@/lib/services/phase-engine";
@@ -38,6 +39,16 @@ import { hasWelcomeNarrationPlayed, markWelcomeNarrationPlayed } from "@/lib/voi
  */
 const PHASE_ACTION_TIMEOUT_MS = 8 * 60 * 1000;
 
+/**
+ * When the AI provider itself comes back rate-limited, an immediate
+ * Retry just repeats the same 429 a moment later. This keeps the action
+ * buttons disabled a short, fixed window past the failure — not a
+ * precise provider-supplied delay (that isn't threaded to the client) —
+ * just enough to stop a reflexive re-click from hammering an
+ * already-rate-limited provider.
+ */
+const RATE_LIMIT_COOLDOWN_MS = 5000;
+
 export function InvestigationDashboard({
   sessionId,
   project,
@@ -55,8 +66,17 @@ export function InvestigationDashboard({
   const [selected, setSelected] = React.useState<PrismPhaseKey>(session.current_phase_key);
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [rateLimitCooldown, setRateLimitCooldown] = React.useState(false);
   const { speak } = useVoiceConsultant();
   const spokenWelcome = React.useRef(false);
+
+  // Re-enables the action buttons automatically once the cooldown window
+  // elapses — no user action, no refresh, required.
+  React.useEffect(() => {
+    if (!rateLimitCooldown) return;
+    const timer = setTimeout(() => setRateLimitCooldown(false), RATE_LIMIT_COOLDOWN_MS);
+    return () => clearTimeout(timer);
+  }, [rateLimitCooldown]);
 
   React.useEffect(() => {
     if (spokenWelcome.current) return;
@@ -130,6 +150,7 @@ export function InvestigationDashboard({
         const message =
           body && "error" in body && body.error ? body.error : "That action couldn't be completed.";
         setError(message);
+        if (isRateLimitedMessage(message)) setRateLimitCooldown(true);
         setPending(false);
         return;
       }
@@ -197,7 +218,7 @@ export function InvestigationDashboard({
             phase={selectedPhase}
             dto={selectedDto}
             uiState={uiStates[selected]}
-            pending={pending}
+            pending={pending || rateLimitCooldown}
             onRun={() => performAction(selected, "run")}
             onApprove={() => performAction(selected, "approve")}
             onRegenerate={() => performAction(selected, "regenerate")}

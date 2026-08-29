@@ -340,9 +340,27 @@ async function runOrRegenerate(
 
   const executionContext = orchestrator.buildExecutionContext(params.phaseKey);
   const provider = params.aiProvider ?? getAiProvider();
-  const result = await timedStep(params.phaseKey, "agent_execute", () =>
-    executor.execute(executionContext, provider),
-  );
+
+  let result: Awaited<ReturnType<typeof executor.execute>>;
+  try {
+    result = await timedStep(params.phaseKey, "agent_execute", () =>
+      executor.execute(executionContext, provider),
+    );
+  } catch (error) {
+    // executor.execute() is expected to catch its own failures and return
+    // a typed AiResult — this only guards against a genuinely unexpected
+    // throw (a composer bug, an uncaught provider exception). Without it,
+    // the phase would stay `running` forever: no route-level catch exists
+    // above this, and a later "run" would then be permanently blocked by
+    // the composer's own "already running" conflict check.
+    const message =
+      error instanceof Error ? error.message : "An unexpected error occurred while running this phase.";
+    await params.admin
+      .from("analysis_phases")
+      .update({ status: "failed", error_message: message })
+      .eq("id", runningPhase.data.id);
+    return fail("error", message);
+  }
 
   const tokensUsed = result.status === "ok" ? (result.usage?.totalTokens ?? 0) : 0;
   await recordUsage(params.userId, "ai", tokensUsed);
@@ -398,13 +416,13 @@ async function runOrRegenerate(
     });
   }
 
-  const message =
+  const message = result.status === "unavailable" ? result.reason : result.message;
+  const code =
     result.status === "unavailable"
-      ? result.reason
-      : result.status === "invalid_output"
-        ? result.message
-        : result.message;
-  const code = result.status === "unavailable" ? "unavailable" : "error";
+      ? "unavailable"
+      : result.status === "rate_limited"
+        ? "rate_limited"
+        : "error";
 
   await params.admin
     .from("analysis_phases")

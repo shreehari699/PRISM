@@ -72,14 +72,29 @@ function looksLikeTimeout(error: unknown): boolean {
 const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
 const MAX_ATTEMPTS = 3;
 
+/**
+ * A provider-supplied retry delay is honored, but never unbounded — a
+ * malformed or unusually large `retryDelay` must not stall a phase run
+ * past what the dashboard's own timeout (8 minutes) and this provider's
+ * per-attempt timeout (120s × up to 3 attempts) can absorb. 20s keeps
+ * three attempts' worth of 429 backoff comfortably inside that budget.
+ */
+const MAX_RATE_LIMIT_BACKOFF_MS = 20_000;
+
 interface ErrorClassification {
   retryable: boolean;
   status?: number;
+  /** True only for an actual HTTP 429 — distinct from other retryable 5xx statuses. */
+  rateLimited?: boolean;
 }
 
 function classifyGenerateError(error: unknown): ErrorClassification {
   if (error instanceof ApiError) {
-    return { retryable: RETRYABLE_STATUS_CODES.has(error.status), status: error.status };
+    return {
+      retryable: RETRYABLE_STATUS_CODES.has(error.status),
+      status: error.status,
+      rateLimited: error.status === 429,
+    };
   }
   if (looksLikeTimeout(error)) {
     return { retryable: true };
@@ -94,12 +109,55 @@ function classifyGenerateError(error: unknown): ErrorClassification {
 }
 
 /**
+ * Reads a provider-supplied retry delay out of a 429's error body —
+ * never invented when absent. Google's API nests a `RetryInfo` proto
+ * detail (`{"retryDelay":"19s"}`) inside the JSON error envelope the SDK
+ * puts in `error.message`; this looks for it there first, then falls
+ * back to a loose regex match in case the envelope isn't full JSON (the
+ * SDK doesn't guarantee one shape across every failure path).
+ */
+function extractProviderRetryDelayMs(error: unknown): number | undefined {
+  if (!(error instanceof Error)) return undefined;
+
+  const parseSeconds = (raw: string): number | undefined => {
+    const match = /^(\d+(?:\.\d+)?)s$/.exec(raw);
+    return match ? Math.round(parseFloat(match[1]) * 1000) : undefined;
+  };
+
+  try {
+    const parsed: unknown = JSON.parse(error.message);
+    const details = (parsed as { error?: { details?: unknown[] } })?.error?.details;
+    if (Array.isArray(details)) {
+      for (const detail of details) {
+        const retryDelay = (detail as { retryDelay?: unknown })?.retryDelay;
+        if (typeof retryDelay === "string") {
+          const ms = parseSeconds(retryDelay);
+          if (ms !== undefined) return ms;
+        }
+      }
+    }
+  } catch {
+    // error.message wasn't a JSON envelope — fall through to the regex.
+  }
+
+  const match = /"retryDelay"\s*:\s*"(\d+(?:\.\d+)?s)"/.exec(error.message);
+  return match ? parseSeconds(match[1]) : undefined;
+}
+
+/**
  * Exponential backoff with jitter: attempt 1's failure waits ~1-2s
  * before attempt 2, attempt 2's failure waits ~2-4s before attempt 3.
  * Jitter avoids every concurrent request retrying in lockstep against
- * an already-overloaded backend.
+ * an already-overloaded backend. For a 429 specifically, a real
+ * provider-supplied retry delay (bounded) is preferred over this guess.
  */
-function backoffDelayMs(attemptNumber: number): number {
+function backoffDelayMs(attemptNumber: number, rateLimitError?: unknown): number {
+  if (rateLimitError !== undefined) {
+    const providerDelay = extractProviderRetryDelayMs(rateLimitError);
+    if (providerDelay !== undefined) {
+      return Math.min(providerDelay, MAX_RATE_LIMIT_BACKOFF_MS);
+    }
+  }
   const base = 1000 * 2 ** (attemptNumber - 1);
   const jitter = base * (0.5 + Math.random() * 0.5);
   return Math.round(base + jitter);
@@ -237,6 +295,7 @@ export class GeminiProvider implements AiProvider {
             ok: false,
             status: classification.status,
             retryable: classification.retryable,
+            rateLimited: classification.rateLimited,
           }),
         );
 
@@ -253,7 +312,7 @@ export class GeminiProvider implements AiProvider {
           break;
         }
 
-        await sleep(backoffDelayMs(attempt));
+        await sleep(backoffDelayMs(attempt, classification.rateLimited ? error : undefined));
       }
     }
 
@@ -270,7 +329,10 @@ export class GeminiProvider implements AiProvider {
    */
   private finalFailureResult(
     error: unknown,
-  ): { status: "error"; message: string } | { status: "unavailable"; reason: string } {
+  ):
+    | { status: "error"; message: string }
+    | { status: "unavailable"; reason: string }
+    | { status: "rate_limited"; message: string; retryAfterMs?: number } {
     if (looksLikeTimeout(error)) {
       return {
         status: "error",
@@ -279,6 +341,13 @@ export class GeminiProvider implements AiProvider {
     }
 
     const classification = classifyGenerateError(error);
+    if (classification.rateLimited) {
+      return {
+        status: "rate_limited",
+        message: `Gemini is rate-limited (HTTP 429) after ${MAX_ATTEMPTS} attempts.`,
+        retryAfterMs: extractProviderRetryDelayMs(error),
+      };
+    }
     if (classification.retryable) {
       return {
         status: "unavailable",

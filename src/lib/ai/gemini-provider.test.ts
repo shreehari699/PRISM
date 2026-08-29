@@ -380,6 +380,165 @@ describe("GeminiProvider.generateStructured", () => {
     expect(result.status).toBe("ok");
   });
 
+  describe("HTTP 429 rate-limit handling", () => {
+    it("classifies a 429 distinctly from a generic 5xx and honors a provider-supplied retry delay", async () => {
+      vi.useFakeTimers();
+      try {
+        generateContentMock.mockRejectedValue(
+          new MockApiError({
+            status: 429,
+            message: JSON.stringify({
+              error: {
+                code: 429,
+                message: "Resource has been exhausted.",
+                status: "RESOURCE_EXHAUSTED",
+                details: [{ "@type": "type.googleapis.com/google.rpc.RetryInfo", retryDelay: "3s" }],
+              },
+            }),
+          }),
+        );
+
+        const provider = new GeminiProvider("test-key", "gemini-3.6-flash");
+        const resultPromise = provider.generateStructured({
+          systemInstruction: "sys",
+          prompt: "prompt",
+          schema,
+        });
+
+        // Only the provider-supplied 3s delay should be needed between
+        // attempts — if this hung on a much longer default backoff
+        // instead, advancing exactly 2×3s wouldn't be enough to finish.
+        await vi.advanceTimersByTimeAsync(3000);
+        await vi.advanceTimersByTimeAsync(3000);
+        const result = await resultPromise;
+
+        expect(result.status).toBe("rate_limited");
+        if (result.status === "rate_limited") {
+          expect(result.retryAfterMs).toBe(3000);
+          // Never the raw provider error body.
+          expect(result.message).not.toContain("RESOURCE_EXHAUSTED");
+          expect(result.message).not.toContain("{");
+        }
+        expect(generateContentMock).toHaveBeenCalledTimes(3);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("falls back to bounded exponential backoff when the 429 carries no retry-after metadata — never inventing a delay", async () => {
+      vi.useFakeTimers();
+      try {
+        generateContentMock.mockRejectedValue(
+          new MockApiError({ status: 429, message: "Too Many Requests" }),
+        );
+
+        const provider = new GeminiProvider("test-key", "gemini-3.6-flash");
+        const resultPromise = provider.generateStructured({
+          systemInstruction: "sys",
+          prompt: "prompt",
+          schema,
+        });
+
+        await vi.runAllTimersAsync();
+        const result = await resultPromise;
+
+        expect(result.status).toBe("rate_limited");
+        if (result.status === "rate_limited") {
+          expect(result.retryAfterMs).toBeUndefined();
+        }
+        expect(generateContentMock).toHaveBeenCalledTimes(3);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("recovers once the 429 resolves, without ever surfacing the transient failure to the caller", async () => {
+      vi.useFakeTimers();
+      try {
+        generateContentMock
+          .mockRejectedValueOnce(new MockApiError({ status: 429, message: "Too Many Requests" }))
+          .mockResolvedValueOnce({
+            text: JSON.stringify({ problemSummary: "ok", severity: 40 }),
+          });
+
+        const provider = new GeminiProvider("test-key", "gemini-3.6-flash");
+        const resultPromise = provider.generateStructured({
+          systemInstruction: "sys",
+          prompt: "prompt",
+          schema,
+        });
+
+        await vi.runAllTimersAsync();
+        const result = await resultPromise;
+
+        expect(result.status).toBe("ok");
+        expect(generateContentMock).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("never retries beyond the bounded attempt limit even under sustained 429s (no infinite retry loop)", async () => {
+      vi.useFakeTimers();
+      try {
+        generateContentMock.mockRejectedValue(
+          new MockApiError({ status: 429, message: "Too Many Requests" }),
+        );
+
+        const provider = new GeminiProvider("test-key", "gemini-3.6-flash");
+        const resultPromise = provider.generateStructured({
+          systemInstruction: "sys",
+          prompt: "prompt",
+          schema,
+        });
+
+        await vi.runAllTimersAsync();
+        await resultPromise;
+
+        expect(generateContentMock).toHaveBeenCalledTimes(3);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("caps an unreasonably large provider-supplied retry delay rather than honoring it verbatim", async () => {
+      vi.useFakeTimers();
+      try {
+        generateContentMock.mockRejectedValue(
+          new MockApiError({
+            status: 429,
+            message: JSON.stringify({
+              error: {
+                code: 429,
+                message: "Resource has been exhausted.",
+                status: "RESOURCE_EXHAUSTED",
+                details: [{ "@type": "type.googleapis.com/google.rpc.RetryInfo", retryDelay: "600s" }],
+              },
+            }),
+          }),
+        );
+
+        const provider = new GeminiProvider("test-key", "gemini-3.6-flash");
+        const resultPromise = provider.generateStructured({
+          systemInstruction: "sys",
+          prompt: "prompt",
+          schema,
+        });
+
+        // 20s (the cap) × 2 backoff waits — if the full 600s were honored
+        // instead, this would still be pending.
+        await vi.advanceTimersByTimeAsync(20_000);
+        await vi.advanceTimersByTimeAsync(20_000);
+        const result = await resultPromise;
+
+        expect(result.status).toBe("rate_limited");
+        expect(generateContentMock).toHaveBeenCalledTimes(3);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   it("reports a blocked prompt as an error rather than an empty success", async () => {
     generateContentMock.mockResolvedValue({
       text: undefined,
